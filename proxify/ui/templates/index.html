@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxify — Dashboard</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+    <style>
+
+        /* ── Filter Bar ── */
+        .filter-bar {
+            min-height: 64px;
+            background: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 32px;
+            gap: 16px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 20;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-bar input,
+        .filter-bar select {
+            height: 34px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 13px;
+            padding: 0 12px;
+            font-family: 'Inter', sans-serif;
+            outline: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .filter-bar select option {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        .filter-bar input:focus,
+        .filter-bar select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        .filter-bar input[type="search"] {
+            min-width: 200px;
+            max-width: 300px;
+            flex: 1;
+            padding-left: 36px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='rgba(255,255,255,0.4)' viewBox='0 0 24 24'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: 12px center;
+        }
+
+        .filter-bar select { cursor: pointer; }
+
+        .filter-btn {
+            height: 36px;
+            padding: 0 16px;
+            border: none;
+            border-radius: 8px;
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            white-space: nowrap;
+        }
+
+        .filter-btn:hover { 
+            background: var(--bg-active); 
+        }
+        
+        .filter-btn.active {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--accent);
+        }
+
+        .export-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .export-btn {
+            height: 36px;
+            padding: 0 16px;
+            border: none;
+            border-radius: 8px;
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .export-btn:hover {
+            background: var(--bg-active);
+        }
+
+        .main {
+            display: flex;
+            flex: 1;
+            padding: 0 32px 32px 32px;
+            gap: 24px;
+            z-index: 10;
+            position: relative;
+            min-height: 0; /* Important for nested flexbox scrolling */
+        }
+
+        /* ── Request List ── */
+        .request-list {
+            width: 55%;
+            min-width: 400px;
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .list-header {
+            display: grid;
+            grid-template-columns: 56px 68px 1fr 110px 80px 70px 80px;
+            gap: 16px;
+            padding: 16px 24px;
+            align-items: center;
+            background: transparent;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .list-body {
+            flex: 1;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-active) transparent;
+        }
+
+        .list-body::-webkit-scrollbar { width: 6px; }
+        .list-body::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
+        }
+        .list-body::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .request-row {
+            display: grid;
+            grid-template-columns: 56px 68px 1fr 110px 80px 70px 80px;
+            gap: 16px;
+            padding: 12px 24px;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            animation: slideIn 0.3s ease-out forwards;
+        }
+        
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .request-row:hover { 
+            background: var(--bg-hover);
+        }
+        
+        .request-row.active { 
+            background: var(--bg-active); 
+        }
+
+        .request-row .col-id {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .request-row .col-method {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            font-size: 11.5px;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+        }
+
+        .method-GET { color: var(--green); }
+        .method-POST { color: var(--yellow); }
+        .method-PUT { color: var(--orange); }
+        .method-DELETE { color: var(--red); }
+        .method-PATCH { color: var(--purple); }
+        .method-OPTIONS { color: var(--text-muted); }
+
+        .request-row .col-url {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-secondary);
+            font-size: 12px;
+            transition: color 0.2s;
+        }
+        
+        .request-row:hover .col-url { color: var(--text-primary); }
+
+        .request-row .col-url .domain {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .request-row .col-url .gql-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(168, 85, 247, 0.15);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            color: #d8b4fe;
+            font-size: 10px;
+            font-weight: 700;
+            margin-right: 6px;
+            vertical-align: middle;
+            box-shadow: 0 0 8px rgba(168, 85, 247, 0.2);
+        }
+
+        .request-row .col-type {
+            font-size: 11px;
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .request-row .col-size {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11.5px;
+            color: var(--text-muted);
+        }
+
+        .request-row .col-status {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            font-size: 11.5px;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+        }
+
+        .status-2xx { color: var(--green); }
+        .status-3xx { color: var(--cyan); }
+        .status-4xx { color: var(--yellow); }
+        .status-5xx { color: var(--red); }
+        
+        .request-row .col-time {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        /* ── Detail Panel ── */
+        .detail-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .detail-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            gap: 16px;
+        }
+
+        .detail-empty .icon { font-size: 64px; opacity: 0.1; margin-bottom: 8px; }
+        .detail-empty .text { font-size: 16px; font-weight: 500; color: var(--text-primary); }
+        .detail-empty .subtext { font-size: 14px; }
+
+        .detail-tabs {
+            display: flex;
+            background: transparent;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 0 24px;
+            gap: 24px;
+        }
+
+        .detail-tab {
+            padding: 16px 0;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .detail-tab:hover { color: var(--text-primary); }
+        .detail-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .detail-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--bg-hover) transparent;
+        }
+
+        .detail-content::-webkit-scrollbar { width: 6px; }
+        .detail-content::-webkit-scrollbar-thumb {
+            background: var(--bg-hover);
+            border-radius: 3px;
+        }
+
+        .detail-section {
+            margin-bottom: 20px;
+        }
+
+        .detail-section h3 {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .detail-url {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            word-break: break-all;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            line-height: 1.6;
+        }
+
+        .detail-url .method-label {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 11px;
+            margin-right: 8px;
+        }
+
+        .method-label-GET { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+        .method-label-POST { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
+        .method-label-PUT { background: rgba(249, 115, 22, 0.15); color: var(--orange); }
+        .method-label-DELETE { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+
+        .header-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .header-table tr {
+            border-bottom: 1px solid rgba(30, 41, 59, 0.5);
+        }
+
+        .header-table td {
+            padding: 5px 8px;
+            vertical-align: top;
+        }
+
+        .header-table .h-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+            color: var(--cyan);
+            white-space: nowrap;
+            width: 200px;
+            font-size: 11px;
+        }
+
+        .header-table .h-value {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-secondary);
+            word-break: break-all;
+            font-size: 11px;
+        }
+
+        .body-content {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        /* GraphQL info box */
+        .gql-info {
+            padding: 12px;
+            background: rgba(168, 85, 247, 0.08);
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .gql-info .gql-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--purple);
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+        }
+
+        .gql-info .gql-operation {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .gql-info .gql-docid {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* Status badge */
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+
+        .status-badge-2xx { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+        .status-badge-3xx { background: rgba(6, 182, 212, 0.15); color: var(--cyan); }
+        .status-badge-4xx { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
+        .status-badge-5xx { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+
+        /* Auto-scroll indicator */
+        .autoscroll-indicator {
+            position: fixed;
+            bottom: 20px;
+            left: 20%;
+            transform: translateX(-50%);
+            padding: 6px 16px;
+            background: var(--accent);
+            color: white;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .autoscroll-indicator.visible { opacity: 1; }
+
+        /* Proxy setup info */
+        .setup-banner {
+            padding: 10px 16px;
+            background: rgba(59, 130, 246, 0.08);
+            border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .setup-banner code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: var(--accent);
+        }
+
+        .setup-banner .dismiss {
+            margin-left: auto;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 16px;
+        }
+
+        /* Connection status */
+        .conn-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .conn-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--red);
+            transition: background 0.3s;
+        }
+
+        .conn-dot.connected { background: var(--green); }
+
+        /* Responsive resize handle */
+        .resize-handle {
+            width: 4px;
+            cursor: col-resize;
+            background: transparent;
+            transition: background 0.2s;
+            position: relative;
+            z-index: 10;
+        }
+
+        .resize-handle:hover,
+        .resize-handle.dragging {
+            background: var(--accent);
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="topbar">
+    <div class="logo">
+        <img src="/assets/logo.png" alt="Logo" style="width: 20px; height: 20px; border-radius: 4px;">
+        Proxify
+    </div>
+    <div class="nav-links">
+        <a href="/" class="nav-link active">📡 Requests</a>
+        <a href="/zalo" class="nav-link">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="14" viewBox="0 0 40 20"><rect width="40" height="20" rx="4" fill="#0068ff"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-weight="bold" font-size="11">Zalo</text></svg>
+            Zalo Extractor
+        </a>
+        <a href="/facebook" class="nav-link">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.313h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z"/></svg>
+            Facebook Extractor
+        </a>
+    </div>
+    <div class="conn-status">
+        <div class="conn-dot" id="connDot"></div>
+        <span id="connText">Connecting...</span>
+    </div>
+    <div class="stats-bar">
+        <div class="stat">Requests: <span class="stat-value" id="statTotal">0</span></div>
+        <div class="stat">Domains: <span class="stat-value" id="statDomains">0</span></div>
+        <div class="stat">GraphQL: <span class="stat-value" id="statGraphql">0</span></div>
+    </div>
+</div>
+
+<!-- Setup Banner -->
+<div class="setup-banner" id="setupBanner">
+    📡 Config proxy trên browser: <code>127.0.0.1:8080</code> &nbsp;|&nbsp;
+    Cài cert HTTPS: <code>http://mitm.it</code> &nbsp;|&nbsp;
+    Dashboard đang chạy trên port này
+    <span class="dismiss" onclick="document.getElementById('setupBanner').style.display='none'">✕</span>
+</div>
+
+<!-- Filter Bar -->
+<div class="filter-bar">
+    <div class="filter-group">
+        <input type="search" id="searchInput" placeholder="Tìm kiếm URL, body, GraphQL..." autocomplete="off">
+        <select id="methodFilter">
+            <option value="">Tất cả Methods</option>
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="DELETE">DELETE</option>
+            <option value="PATCH">PATCH</option>
+            <option value="OPTIONS">OPTIONS</option>
+        </select>
+        <select id="statusFilter">
+            <option value="">Tất cả Status</option>
+            <option value="200">200 OK</option>
+            <option value="301">301</option>
+            <option value="302">302</option>
+            <option value="400">400</option>
+            <option value="401">401</option>
+            <option value="403">403</option>
+            <option value="404">404</option>
+            <option value="500">500</option>
+        </select>
+        <select id="domainFilter">
+            <option value="">Tất cả Domains</option>
+        </select>
+        <div style="position: relative; display: inline-block;">
+            <button class="filter-btn" id="dbDomainBtn" onclick="document.getElementById('dbDomainDropdown').style.display = document.getElementById('dbDomainDropdown').style.display === 'none' ? 'block' : 'none'">🎯 Lọc Ghi DB</button>
+            <div id="dbDomainDropdown" style="display: none; position: absolute; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 8px; z-index: 100; min-width: 250px; max-height: 350px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+            </div>
+        </div>
+        <button class="filter-btn" id="dbToggleBtn" onclick="toggleDbIntegration()">🔴 Ghi DB: TẮT</button>
+        <button class="filter-btn" id="gqlFilter" onclick="toggleGqlFilter()">GraphQL</button>
+        <button class="filter-btn" id="autoScrollBtn" onclick="toggleAutoScroll()">⬇ Auto-scroll</button>
+    </div>
+
+    <div class="filter-group">
+        <div class="export-group">
+            <button class="export-btn" onclick="exportData('json')">📄 JSON</button>
+            <button class="export-btn" onclick="exportData('har')">🌐 HAR</button>
+            <button class="export-btn" onclick="exportData('python')">🐍 Python</button>
+            <button class="export-btn" onclick="exportData('curl')">⚡ cURL</button>
+        </div>
+        <button class="filter-btn" onclick="clearAll()" style="color: var(--red);">🗑 Clear</button>
+    </div>
+</div>
+
+<!-- Main Content -->
+<div class="main">
+    <!-- Request List -->
+    <div class="request-list" id="requestList">
+        <div class="list-header">
+            <span>#</span>
+            <span>Method</span>
+            <span>URL</span>
+            <span>Content-Type</span>
+            <span>Size</span>
+            <span>Status</span>
+            <span>Time</span>
+        </div>
+        <div class="list-body" id="listBody"></div>
+    </div>
+
+    <!-- Resize Handle -->
+    <div class="resize-handle" id="resizeHandle"></div>
+
+    <!-- Detail Panel -->
+    <div class="detail-panel" id="detailPanel">
+        <div class="detail-empty" id="detailEmpty">
+            <div class="icon">📡</div>
+            <div class="text">Chọn một request để xem chi tiết</div>
+            <div class="subtext">Đang chờ tín hiệu từ proxy...</div>
+        </div>
+        <div id="detailContent" style="display: none;">
+            <div class="detail-tabs" id="detailTabs">
+                <div class="detail-tab active" data-tab="overview" onclick="switchTab('overview')">Overview</div>
+                <div class="detail-tab" data-tab="request" onclick="switchTab('request')">Request</div>
+                <div class="detail-tab" data-tab="response" onclick="switchTab('response')">Response</div>
+                <div class="detail-tab" data-tab="graphql" onclick="switchTab('graphql')" id="gqlTab" style="display:none">
+                    GraphQL
+                </div>
+            </div>
+            <div class="detail-content" id="detailBody"></div>
+        </div>
+    </div>
+</div>
+
+<div class="autoscroll-indicator" id="autoScrollIndicator">⬇ Auto-scrolling</div>
+
+<script>
+// ── State ──
+let requests = [];
+let selectedId = null;
+let selectedData = null;
+let autoScroll = true;
+let gqlOnly = false;
+let ws = null;
+let reconnectTimer = null;
+let currentTab = 'overview';
+let dbIntegrationEnabled = false;
+let dbAllowedDomains = [];
+let savedListWidth = '500px'; // default width
+
+// ── Configuration ──
+async function loadConfig() {
+    try {
+        const res = await fetch('/api/config');
+        const data = await res.json();
+        dbIntegrationEnabled = data.db_integration_enabled;
+        dbAllowedDomains = data.db_allowed_domains || [];
+        updateDbToggleButton();
+        updateDbDomainBtn();
+    } catch (e) {
+        console.error('Failed to load config', e);
+    }
+}
+
+async function saveDbDomains() {
+    const checkboxes = document.querySelectorAll('#dbDomainDropdown input[type="checkbox"]:checked');
+    dbAllowedDomains = Array.from(checkboxes).map(cb => cb.value);
+    
+    try {
+        await fetch('/api/toggle_db', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({allowed_domains: dbAllowedDomains})
+        });
+        document.getElementById('dbDomainDropdown').style.display = 'none';
+        updateDbDomainBtn();
+    } catch (e) {
+        console.error('Failed to save DB domains', e);
+    }
+}
+
+function updateDbDomainBtn() {
+    const btn = document.getElementById('dbDomainBtn');
+    if (dbAllowedDomains.length > 0) {
+        btn.textContent = `🎯 Lọc Ghi DB (${dbAllowedDomains.length})`;
+        btn.classList.add('active');
+    } else {
+        btn.textContent = '🎯 Lọc Ghi DB (Tất cả)';
+        btn.classList.remove('active');
+    }
+}
+
+async function toggleDbIntegration() {
+    dbIntegrationEnabled = !dbIntegrationEnabled;
+    try {
+        await fetch('/api/toggle_db', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: dbIntegrationEnabled})
+        });
+        updateDbToggleButton();
+    } catch (e) {
+        console.error('Failed to toggle DB integration', e);
+        // Revert on failure
+        dbIntegrationEnabled = !dbIntegrationEnabled;
+    }
+}
+
+function updateDbToggleButton() {
+    const btn = document.getElementById('dbToggleBtn');
+    if (dbIntegrationEnabled) {
+        btn.textContent = '🟢 Ghi DB: BẬT';
+        btn.classList.add('active');
+        btn.style.borderColor = 'var(--green)';
+        btn.style.color = 'var(--green)';
+        btn.style.background = 'rgba(34, 197, 94, 0.1)';
+    } else {
+        btn.textContent = '🔴 Ghi DB: TẮT';
+        btn.classList.remove('active');
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.background = 'var(--bg-tertiary)';
+    }
+    
+    if (typeof updateExportButtons === 'function') {
+        updateExportButtons();
+    }
+}
+
+// ── WebSocket ──
+function connectWS() {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+    ws.onopen = () => {
+        document.getElementById('connDot').classList.add('connected');
+        document.getElementById('connText').textContent = 'Connected';
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+
+    ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'new_request') {
+            addRequestToList(msg.data);
+            updateStats();
+        } else if (msg.type === 'update_id') {
+            const data = msg.data;
+            const req = requests.find(r => r.req_uuid === data.req_uuid);
+            if (req) {
+                req.id = data.row_id;
+            }
+            const row = document.querySelector(`.request-row[data-uuid="${data.req_uuid}"]`);
+            if (row) {
+                row.dataset.id = data.row_id;
+                row.onclick = () => selectRequest(data.row_id);
+                const colId = row.querySelector('.col-id');
+                if (colId) colId.innerHTML = data.row_id;
+            }
+        }
+    };
+
+    ws.onclose = () => {
+        document.getElementById('connDot').classList.remove('connected');
+        document.getElementById('connText').textContent = 'Disconnected';
+        reconnectTimer = setTimeout(connectWS, 3000);
+    };
+
+    ws.onerror = () => ws.close();
+}
+
+// ── Render ──
+function addRequestToList(req) {
+    requests.unshift(req);
+
+    // Filter incoming requests based on current UI filters
+    const filterSearch = document.getElementById('searchInput').value.trim().toLowerCase();
+    const filterMethod = document.getElementById('methodFilter').value;
+    const filterStatus = document.getElementById('statusFilter').value;
+    const filterDomain = document.getElementById('domainFilter').value;
+
+    if (filterMethod && req.method !== filterMethod) return;
+    if (filterStatus && String(req.status_code) !== filterStatus) return;
+    if (filterDomain && req.domain !== filterDomain) return;
+    if (typeof gqlOnly !== 'undefined' && gqlOnly && !req.is_graphql) return;
+    if (filterSearch) {
+        const inUrl = (req.url || '').toLowerCase().includes(filterSearch);
+        const inBody = (req.request_body || '').toLowerCase().includes(filterSearch) || (req.response_body || '').toLowerCase().includes(filterSearch);
+        const inGql = (req.graphql_operation || '').toLowerCase().includes(filterSearch);
+        if (!inUrl && !inBody && !inGql) return;
+    }
+
+    const row = document.createElement('div');
+    row.className = 'request-row';
+    row.dataset.id = req.id;
+    if (req.req_uuid) row.dataset.uuid = req.req_uuid;
+    row.onclick = () => selectRequest(req.id, req.req_uuid);
+
+    const statusClass = getStatusClass(req.status_code);
+    const methodClass = `method-${req.method}`;
+    const domain = req.domain || '';
+    const path = req.path || '';
+    const contentType = (req.response_content_type || '').split(';')[0];
+    const size = formatSize(req.response_size || 0);
+    const timeStr = req.timestamp ? new Date(req.timestamp).toLocaleTimeString('vi-VN', { hour12: false }) : '—';
+
+    let urlDisplay = `<span class="domain">${escHtml(domain)}</span>${escHtml(path)}`;
+    if (req.is_graphql && req.graphql_operation) {
+        urlDisplay = `<span class="gql-tag">GQL</span>${escHtml(req.graphql_operation)}`;
+    } else if (req.is_graphql) {
+        urlDisplay = `<span class="gql-tag">GQL</span>${urlDisplay}`;
+    }
+
+    const idDisplay = req.id === 0 ? '<span style="color:var(--accent);font-size:10px;letter-spacing:1px;animation: pulse 1.5s infinite;">LIVE</span>' : req.id;
+    
+    row.innerHTML = `
+        <span class="col-id">${idDisplay}</span>
+        <span class="col-method ${methodClass}">${req.method}</span>
+        <span class="col-url">${urlDisplay}</span>
+        <span class="col-type">${escHtml(contentType)}</span>
+        <span class="col-size">${size}</span>
+        <span class="col-status ${statusClass}">${req.status_code || '—'}</span>
+        <span class="col-time">${escHtml(timeStr)}</span>
+    `;
+
+    const listBody = document.getElementById('listBody');
+    listBody.prepend(row);
+
+    // Keep max 1000 rows in DOM
+    while (listBody.children.length > 1000) {
+        listBody.removeChild(listBody.lastChild);
+    }
+
+    if (autoScroll) {
+        listBody.scrollTop = 0;
+    }
+}
+
+function renderRequestList(data) {
+    const listBody = document.getElementById('listBody');
+    listBody.innerHTML = '';
+    requests = data;
+    // Data comes newest-first from API
+    data.forEach(req => {
+        const row = document.createElement('div');
+        row.className = 'request-row';
+        row.dataset.id = req.id;
+        if (req.req_uuid) row.dataset.uuid = req.req_uuid;
+        row.onclick = () => selectRequest(req.id, req.req_uuid);
+
+        const statusClass = getStatusClass(req.status_code);
+        const methodClass = `method-${req.method}`;
+        const domain = req.domain || '';
+        const path = req.path || '';
+        const contentType = (req.response_content_type || '').split(';')[0];
+        const size = formatSize(req.response_size || 0);
+        const timeStr = req.timestamp ? new Date(req.timestamp).toLocaleTimeString('vi-VN', { hour12: false }) : '—';
+
+        let urlDisplay = `<span class="domain">${escHtml(domain)}</span>${escHtml(path)}`;
+        if (req.is_graphql && req.graphql_operation) {
+            urlDisplay = `<span class="gql-tag">GQL</span>${escHtml(req.graphql_operation)}`;
+        } else if (req.is_graphql) {
+            urlDisplay = `<span class="gql-tag">GQL</span>${urlDisplay}`;
+        }
+
+        const idDisplay = req.id === 0 ? '<span style="color:var(--accent);font-size:10px;letter-spacing:1px;animation: pulse 1.5s infinite;">LIVE</span>' : req.id;
+
+        row.innerHTML = `
+            <span class="col-id">${idDisplay}</span>
+            <span class="col-method ${methodClass}">${req.method}</span>
+            <span class="col-url">${urlDisplay}</span>
+            <span class="col-type">${escHtml(contentType)}</span>
+            <span class="col-size">${size}</span>
+            <span class="col-status ${statusClass}">${req.status_code || '—'}</span>
+            <span class="col-time">${escHtml(timeStr)}</span>
+        `;
+        listBody.appendChild(row);
+    });
+}
+
+async function selectRequest(id, uuid) {
+    // Highlight row
+    document.querySelectorAll('.request-row.active').forEach(r => r.classList.remove('active'));
+    
+    let row;
+    if (uuid) {
+        row = document.querySelector(`.request-row[data-uuid="${uuid}"]`);
+    } else {
+        row = document.querySelector(`.request-row[data-id="${id}"]`);
+    }
+    if (row) row.classList.add('active');
+
+    selectedId = id;
+    
+    if (id === 0) {
+        document.getElementById('detailEmpty').style.display = '';
+        document.getElementById('detailEmpty').innerHTML = '<div class="icon">⚡</div><div class="text">Request LIVE</div><div class="subtext">Đang chờ lưu vào Database...</div>';
+        document.getElementById('detailContent').style.display = 'none';
+        if (typeof updateExportButtons === 'function') updateExportButtons();
+        return;
+    }
+    
+    document.getElementById('detailEmpty').innerHTML = '<div class="icon">📡</div><div class="text">Chọn một request để xem chi tiết</div><div class="subtext">Đang chờ tín hiệu từ proxy...</div>';
+
+    // Fetch full details
+    const resp = await fetch(`/api/requests/${id}`);
+    selectedData = await resp.json();
+
+    document.getElementById('detailEmpty').style.display = 'none';
+    document.getElementById('detailContent').style.display = 'flex';
+    document.getElementById('detailContent').style.flexDirection = 'column';
+    document.getElementById('detailContent').style.height = '100%';
+
+    // Show/hide GraphQL tab
+    const gqlTab = document.getElementById('gqlTab');
+    gqlTab.style.display = selectedData.is_graphql ? '' : 'none';
+
+    renderDetail(currentTab);
+    updateExportButtons();
+}
+
+function renderDetail(tab) {
+    currentTab = tab;
+    if (!selectedData) return;
+
+    const body = document.getElementById('detailBody');
+    const d = selectedData;
+
+    // Update tab active states
+    document.querySelectorAll('.detail-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+    });
+
+    if (tab === 'overview') {
+        const statusBadgeClass = getStatusBadgeClass(d.status_code);
+        let html = '';
+
+        if (d.is_graphql) {
+            html += `
+                <div class="gql-info">
+                    <div class="gql-label">⚡ Facebook GraphQL</div>
+                    <div class="gql-operation">${escHtml(d.graphql_operation || 'Unknown Operation')}</div>
+                    <div class="gql-docid">doc_id: ${escHtml(d.graphql_doc_id || 'N/A')}</div>
+                </div>
+            `;
+        }
+
+        html += `
+            <div class="detail-section">
+                <div class="detail-url">
+                    <span class="method-label method-label-${d.method}">${d.method}</span>
+                    <span class="${statusBadgeClass} status-badge">${d.status_code}</span>
+                    <br><br>
+                    ${escHtml(d.url)}
+                </div>
+            </div>
+            <div class="detail-section">
+                <h3>Thông tin</h3>
+                <table class="header-table">
+                    <tr><td class="h-name">Domain</td><td class="h-value">${escHtml(d.domain)}</td></tr>
+                    <tr><td class="h-name">Path</td><td class="h-value">${escHtml(d.path)}</td></tr>
+                    <tr><td class="h-name">Query</td><td class="h-value">${escHtml(d.query_string || '—')}</td></tr>
+                    <tr><td class="h-name">Status</td><td class="h-value">${d.status_code}</td></tr>
+                    <tr><td class="h-name">Content-Type</td><td class="h-value">${escHtml(d.response_content_type || '—')}</td></tr>
+                    <tr><td class="h-name">Size</td><td class="h-value">${formatSize(d.response_size || 0)}</td></tr>
+                    <tr><td class="h-name">Duration</td><td class="h-value">${d.duration_ms ? d.duration_ms + ' ms' : '—'}</td></tr>
+                    <tr><td class="h-name">Timestamp</td><td class="h-value">${escHtml(d.timestamp)}</td></tr>
+                </table>
+            </div>
+        `;
+        body.innerHTML = html;
+
+    } else if (tab === 'request') {
+        let html = `
+            <div class="detail-section">
+                <h3>Request Headers</h3>
+                ${renderHeaders(d.request_headers)}
+            </div>
+        `;
+        if (d.request_body) {
+            html += `
+                <div class="detail-section">
+                    <h3>Request Body</h3>
+                    <div class="body-content">${escHtml(tryPrettyPrint(d.request_body, d.request_content_type))}</div>
+                </div>
+            `;
+        }
+        body.innerHTML = html;
+
+    } else if (tab === 'response') {
+        let html = `
+            <div class="detail-section">
+                <h3>Response Headers</h3>
+                ${renderHeaders(d.response_headers)}
+            </div>
+        `;
+        if (d.response_body) {
+            html += `
+                <div class="detail-section">
+                    <h3>Response Body</h3>
+                    <div class="body-content">${escHtml(tryPrettyPrint(d.response_body, d.response_content_type))}</div>
+                </div>
+            `;
+        }
+        body.innerHTML = html;
+
+    } else if (tab === 'graphql') {
+        let html = `
+            <div class="gql-info">
+                <div class="gql-label">⚡ GraphQL Operation</div>
+                <div class="gql-operation">${escHtml(d.graphql_operation || 'Unknown')}</div>
+                <div class="gql-docid">doc_id: ${escHtml(d.graphql_doc_id || 'N/A')}</div>
+            </div>
+        `;
+        if (d.graphql_variables) {
+            let vars = d.graphql_variables;
+            try { vars = JSON.stringify(JSON.parse(vars), null, 2); } catch(e) {}
+            html += `
+                <div class="detail-section">
+                    <h3>Variables</h3>
+                    <div class="body-content">${escHtml(vars)}</div>
+                </div>
+            `;
+        }
+
+        // Parse form body for other GraphQL params
+        if (d.request_body) {
+            try {
+                const params = new URLSearchParams(d.request_body);
+                const interestingParams = ['fb_dtsg', '__user', 'av', '__rev', '__hs', '__ccg', 'fb_api_caller_class'];
+                let paramsHtml = '<table class="header-table">';
+                for (const key of interestingParams) {
+                    const val = params.get(key);
+                    if (val) {
+                        paramsHtml += `<tr><td class="h-name">${escHtml(key)}</td><td class="h-value">${escHtml(val)}</td></tr>`;
+                    }
+                }
+                paramsHtml += '</table>';
+                html += `
+                    <div class="detail-section">
+                        <h3>GraphQL Parameters</h3>
+                        ${paramsHtml}
+                    </div>
+                `;
+            } catch(e) {}
+        }
+
+        body.innerHTML = html;
+    }
+}
+
+function switchTab(tab) {
+    renderDetail(tab);
+}
+
+// ── Helpers ──
+function renderHeaders(headers) {
+    if (!headers || typeof headers !== 'object') return '<div class="body-content">No headers</div>';
+    let html = '<table class="header-table">';
+    for (const [k, v] of Object.entries(headers)) {
+        html += `<tr><td class="h-name">${escHtml(k)}</td><td class="h-value">${escHtml(v)}</td></tr>`;
+    }
+    html += '</table>';
+    return html;
+}
+
+function tryPrettyPrint(text, contentType) {
+    if (!text) return '';
+    contentType = contentType || '';
+    if (contentType.includes('json') || (text.startsWith('{') || text.startsWith('['))) {
+        try {
+            return JSON.stringify(JSON.parse(text), null, 2);
+        } catch (e) {}
+    }
+    // Try URL-encoded form data
+    if (contentType.includes('x-www-form-urlencoded') || text.includes('&') && text.includes('=') && !text.includes('<')) {
+        try {
+            const params = new URLSearchParams(text);
+            let lines = [];
+            for (const [k, v] of params.entries()) {
+                let displayV = v;
+                // Try to pretty-print JSON values
+                if (v.startsWith('{') || v.startsWith('[')) {
+                    try { displayV = JSON.stringify(JSON.parse(v), null, 2); } catch(e) {}
+                }
+                lines.push(`${k} = ${displayV}`);
+            }
+            if (lines.length > 1) return lines.join('\n\n');
+        } catch(e) {}
+    }
+    return text;
+}
+
+function getStatusClass(code) {
+    if (!code) return '';
+    if (code < 300) return 'status-2xx';
+    if (code < 400) return 'status-3xx';
+    if (code < 500) return 'status-4xx';
+    return 'status-5xx';
+}
+
+function getStatusBadgeClass(code) {
+    if (!code) return 'status-badge';
+    if (code < 300) return 'status-badge-2xx';
+    if (code < 400) return 'status-badge-3xx';
+    if (code < 500) return 'status-badge-4xx';
+    return 'status-badge-5xx';
+}
+
+function formatSize(bytes) {
+    if (bytes === 0) return '0 B';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function escHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Filters ──
+let filterTimeout = null;
+
+function applyFilters() {
+    if (filterTimeout) clearTimeout(filterTimeout);
+    filterTimeout = setTimeout(async () => {
+        const params = new URLSearchParams();
+        const search = document.getElementById('searchInput').value.trim();
+        const method = document.getElementById('methodFilter').value;
+        const status = document.getElementById('statusFilter').value;
+        const domain = document.getElementById('domainFilter').value;
+
+        if (search) params.set('search', search);
+        if (method) params.set('method', method);
+        if (status) params.set('status_code', status);
+        if (domain) params.set('domain', domain);
+        if (gqlOnly) params.set('graphql_only', 'true');
+
+        const resp = await fetch(`/api/requests?${params}`);
+        const data = await resp.json();
+        renderRequestList(data);
+    }, 300);
+}
+
+document.getElementById('searchInput').addEventListener('input', applyFilters);
+document.getElementById('methodFilter').addEventListener('change', applyFilters);
+document.getElementById('statusFilter').addEventListener('change', applyFilters);
+document.getElementById('domainFilter').addEventListener('change', applyFilters);
+
+function toggleGqlFilter() {
+    gqlOnly = !gqlOnly;
+    document.getElementById('gqlFilter').classList.toggle('active', gqlOnly);
+    applyFilters();
+}
+
+function toggleAutoScroll() {
+    autoScroll = !autoScroll;
+    document.getElementById('autoScrollBtn').classList.toggle('active', autoScroll);
+    const ind = document.getElementById('autoScrollIndicator');
+    ind.classList.toggle('visible', autoScroll);
+    setTimeout(() => ind.classList.remove('visible'), 2000);
+}
+
+// ── Export ──
+function exportData(format) {
+    if (!selectedId || selectedId === 0) {
+        alert('Vui lòng chọn 1 request hợp lệ để xuất dữ liệu.');
+        return;
+    }
+    const params = new URLSearchParams();
+    params.set('ids', selectedId);
+    window.open(`/api/export/${format}?${params}`, '_blank');
+}
+
+function updateExportButtons() {
+    const group = document.querySelector('.export-group');
+    if (!selectedId || selectedId === 0) {
+        group.style.opacity = '0.3';
+        group.style.pointerEvents = 'none';
+    } else {
+        group.style.opacity = '1';
+        group.style.pointerEvents = 'auto';
+    }
+}
+
+// ── Clear All ──
+async function clearAll() {
+    if (!confirm('Xóa tất cả requests đã bắt?')) return;
+    await fetch('/api/requests', { method: 'DELETE' });
+    document.getElementById('listBody').innerHTML = '';
+    requests = [];
+    selectedData = null;
+    selectedId = null;
+    document.getElementById('detailEmpty').style.display = '';
+    document.getElementById('detailContent').style.display = 'none';
+    updateStats();
+    updateExportButtons();
+}
+
+// ── Stats ──
+async function updateStats() {
+    try {
+        const resp = await fetch('/api/stats');
+        const stats = await resp.json();
+        document.getElementById('statTotal').textContent = stats.total_requests || 0;
+        document.getElementById('statDomains').textContent = stats.unique_domains || 0;
+        document.getElementById('statGraphql').textContent = stats.graphql_requests || 0;
+    } catch(e) {}
+}
+
+// ── Update domain filter ──
+async function updateDomainFilter() {
+    try {
+        const resp = await fetch('/api/domains');
+        const domains = await resp.json();
+        const select = document.getElementById('domainFilter');
+        const current = select.value;
+        select.innerHTML = '<option value="">Tất cả Domains</option>';
+        
+        const dbContainer = document.getElementById('dbDomainDropdown');
+        let dbHtml = `
+            <div style="display:flex; justify-content:space-between; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px;">
+                <span style="font-size: 11px; color: var(--text-muted); align-self: center;">Để trống = Tất cả</span>
+                <button onclick="saveDbDomains()" style="background: var(--accent); color: white; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 11px;">Lưu</button>
+            </div>
+        `;
+
+        domains.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.domain;
+            opt.textContent = `${d.domain} (${d.count})`;
+            if (d.domain === current) opt.selected = true;
+            select.appendChild(opt);
+            
+            const checked = dbAllowedDomains.includes(d.domain) ? 'checked' : '';
+            dbHtml += `
+                <label style="display: flex; align-items: center; font-size: 12px; margin-bottom: 6px; cursor: pointer; color: var(--text-primary);">
+                    <input type="checkbox" value="${d.domain}" ${checked} style="margin-right: 6px;"> ${d.domain}
+                </label>
+            `;
+        });
+        
+        // Only update if not currently interacting to avoid re-rendering while clicking
+        if (dbContainer.style.display === 'none') {
+            dbContainer.innerHTML = dbHtml;
+        }
+        select.value = current;
+    } catch(e) {}
+}
+
+// ── Resize Handle ──
+const resizeHandle = document.getElementById('resizeHandle');
+const requestList = document.getElementById('requestList');
+let isResizing = false;
+
+resizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    resizeHandle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const newWidth = e.clientX;
+    if (newWidth > 300 && newWidth < window.innerWidth - 300) {
+        requestList.style.width = newWidth + 'px';
+    }
+});
+
+document.addEventListener('mouseup', () => {
+    if (isResizing) {
+        isResizing = false;
+        resizeHandle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    }
+});
+
+// ── Keyboard shortcuts ──
+document.addEventListener('keydown', (e) => {
+    // Arrow up/down to navigate requests
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const rows = document.querySelectorAll('.request-row');
+        if (rows.length === 0) return;
+
+        let currentIdx = -1;
+        rows.forEach((row, i) => {
+            if (row.classList.contains('active')) currentIdx = i;
+        });
+
+        let nextIdx;
+        if (e.key === 'ArrowDown') {
+            nextIdx = currentIdx < rows.length - 1 ? currentIdx + 1 : 0;
+        } else {
+            nextIdx = currentIdx > 0 ? currentIdx - 1 : rows.length - 1;
+        }
+
+        rows[nextIdx].click();
+        rows[nextIdx].scrollIntoView({ block: 'nearest' });
+    }
+
+    // Escape to deselect
+    if (e.key === 'Escape') {
+        selectedId = null;
+        selectedData = null;
+        document.querySelectorAll('.request-row.active').forEach(r => r.classList.remove('active'));
+        document.getElementById('detailEmpty').style.display = '';
+        document.getElementById('detailContent').style.display = 'none';
+        updateExportButtons();
+    }
+
+    // / to focus search
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
+        const search = document.getElementById('searchInput');
+        if (document.activeElement !== search) {
+            e.preventDefault();
+            search.focus();
+        }
+    }
+});
+
+// ── Init ──
+async function init() {
+    await loadConfig();
+    connectWS();
+    toggleAutoScroll(); // Enable by default
+
+    // Load existing requests
+    const resp = await fetch('/api/requests?limit=200');
+    const data = await resp.json();
+    renderRequestList(data);
+
+    updateStats();
+    updateDomainFilter();
+    updateExportButtons();
+
+    // Periodically update domain filter and stats
+    setInterval(() => {
+        updateDomainFilter();
+        updateStats();
+    }, 10000);
+}
+
+init();
+</script>
+</body>
+</html>

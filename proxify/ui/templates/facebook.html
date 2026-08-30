@@ -1,0 +1,1910 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facebook Extractor</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .main-container {
+            padding: 0 32px 32px 32px;
+            display: flex;
+            flex-direction: row;
+            gap: 24px;
+            max-width: 100%;
+            width: 100%;
+            height: calc(100vh - 64px);
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        .left-panel {
+            width: 400px;
+            min-width: 320px;
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .right-panel {
+            flex: 1;
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        .left-panel h2 {
+            font-size: 18px;
+            margin-bottom: 12px;
+        }
+
+        .card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .form-group label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .form-group input {
+            height: 44px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: var(--text-primary);
+            padding: 0 16px;
+            outline: none;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .form-group input:focus {
+            border-color: var(--accent);
+            background: rgba(0, 0, 0, 0.4);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        .btn-crawl {
+            height: 44px;
+            padding: 0 32px;
+            border: none;
+            border-radius: 8px;
+            background: var(--accent);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            width: 100%;
+        }
+
+        .btn-crawl:hover {
+            background: var(--accent-hover);
+        }
+
+        .status-box {
+            margin-top: 24px;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            font-family: inherit;
+            font-size: 13px;
+            color: var(--green);
+            display: none;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            gap: 16px;
+        }
+
+        .empty-state .icon {
+            font-size: 64px;
+            opacity: 0.1;
+            margin-bottom: 8px;
+        }
+
+        .empty-state .text {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .empty-state .sub {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* ── Comment Modal ────────────────────────────── */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+            width: 640px;
+            max-width: 90vw;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            animation: modalIn 0.25s ease;
+        }
+
+        @keyframes modalIn {
+            from {
+                transform: translateY(16px) scale(0.97);
+                opacity: 0;
+            }
+
+            to {
+                transform: none;
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+
+        .modal-close:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px;
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .comment-item {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            animation: fadeSlideIn 0.3s ease;
+        }
+
+        .comment-item:last-child {
+            border-bottom: none;
+        }
+
+        @keyframes fadeSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        .comment-item .c-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .comment-item .c-avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .comment-item .c-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .comment-item .c-name {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--accent);
+        }
+
+        .comment-item .c-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
+
+        .comment-item .c-body {
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .comment-item .c-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .comment-item.reply {
+            margin-left: 32px;
+            padding-left: 12px;
+            border-left: 2px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .btn-comment {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .btn-comment:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+        }
+
+        .btn-comment.has-data {
+            color: var(--accent);
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-comment.has-data:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .btn-comment.crawling {
+            color: var(--green);
+            border-color: rgba(52, 211, 153, 0.3);
+            pointer-events: none;
+            opacity: 0.8;
+        }
+
+        .btn-crawl-sm {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-crawl-sm:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-crawl-sm:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .comment-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+
+        .comment-empty .icon {
+            font-size: 40px;
+            opacity: 0.15;
+            margin-bottom: 12px;
+        }
+
+        .spinner-sm {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── Checkbox ────────────────────────────────── */
+        .cb-cell {
+            width: 40px;
+            min-width: 40px;
+            text-align: center;
+        }
+
+        .cb-cell input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        /* ── Status Badge ────────────────────────────── */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+            white-space: nowrap;
+        }
+
+        .status-badge.active {
+            background: rgba(52, 211, 153, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(52, 211, 153, 0.3);
+        }
+
+        .status-badge.active:hover {
+            background: rgba(52, 211, 153, 0.25);
+        }
+
+        .status-badge.inactive {
+            background: rgba(248, 113, 113, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+
+        .status-badge.inactive:hover {
+            background: rgba(248, 113, 113, 0.25);
+        }
+
+
+        /* ── Filter Pills ────────────────────────────── */
+        .filter-bar {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .filter-pill {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .filter-pill:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-primary);
+        }
+
+        .filter-pill.active {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+
+        /* ── Filter Dropdown ─────────────────────────── */
+        .status-filter-btn {
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            margin-left: -10px;
+        }
+
+        .status-filter-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--border);
+        }
+
+        .filter-dropdown-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            background: #1e293b;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            min-width: 160px;
+            padding: 6px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .filter-dropdown-item {
+            padding: 8px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: var(--text-secondary);
+            border-radius: 6px;
+            transition: all 0.15s;
+            margin-bottom: 2px;
+        }
+
+        .filter-dropdown-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .filter-dropdown-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+        }
+
+        .filter-dropdown-item.active {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .filter-dropdown-item .check-icon {
+            opacity: 0;
+            color: var(--accent);
+        }
+
+        .filter-dropdown-item.active .check-icon {
+            opacity: 1;
+        }
+
+        /* ── Floating Action Bar ─────────────────────── */
+        .fab-bar {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(15, 23, 42, 0.92);
+            backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 16px;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+            z-index: 900;
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            max-width: 90vw;
+        }
+
+        .fab-bar.visible {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .fab-count {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            padding-right: 12px;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            white-space: nowrap;
+        }
+
+        .fab-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .fab-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            transform: translateY(-1px);
+        }
+
+        .fab-btn.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .fab-btn.primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .fab-btn.danger {
+            color: #f87171;
+            border-color: rgba(248, 113, 113, 0.3);
+        }
+
+        .fab-btn.danger:hover {
+            background: rgba(248, 113, 113, 0.15);
+        }
+
+        .fab-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* ── Toasts ─────────────────────── */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 1000;
+        }
+
+        .toast {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            border-radius: 12px;
+            padding: 16px 20px;
+            color: var(--text-primary);
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transform: translateX(120%);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            min-width: 250px;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .toast-icon {
+            font-size: 20px;
+        }
+        
+        .toast-content {
+            flex: 1;
+            line-height: 1.4;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div class="topbar">
+        <a href="/" class="logo">
+            <img src="/assets/logo.png" alt="Logo" style="width: 20px; height: 20px; border-radius: 4px;">
+            Proxify
+        </a>
+        <div class="nav-links">
+            <a href="/" class="nav-link">📡 Requests</a>
+            <a href="/zalo" class="nav-link">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="14" viewBox="0 0 40 20">
+                    <rect width="40" height="20" rx="4" fill="#0068ff" /><text x="50%" y="55%"
+                        dominant-baseline="middle" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif"
+                        font-weight="bold" font-size="11">Zalo</text>
+                </svg>
+                Zalo Extractor
+            </a>
+            <a href="/facebook" class="nav-link active">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.313h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
+                </svg>
+                Facebook Extractor
+            </a>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="left-panel">
+            <h2>Auto Crawl Facebook</h2>
+
+            <!-- Cookie Configuration (collapsible) -->
+            <div style="margin-bottom: 20px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;">
+                <div id="cookieToggle" onclick="toggleCookieSection()"
+                    style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; cursor: pointer; background: var(--bg-tertiary); transition: all 0.2s;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>🍪</span>
+                        <span style="font-size: 14px; font-weight: 500;">Facebook Cookie</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span id="cookieStatus" style="font-size: 12px; color: var(--text-muted);">Chưa cài đặt</span>
+                        <span id="cookieArrow" style="transition: transform 0.2s;">▶</span>
+                    </div>
+                </div>
+                <div id="cookieSection" style="display: none; padding: 16px; border-top: 1px solid var(--border);">
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.6;">
+                        <b>Cách lấy cookie:</b>
+                        <ol style="margin: 8px 0; padding-left: 18px;">
+                            <li>Đăng nhập Facebook trên trình duyệt</li>
+                            <li>Nhấn <kbd
+                                    style="background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px; font-size: 11px;">F12</kbd>
+                                → Tab <b>Application</b> → <b>Cookies</b></li>
+                            <li>Hoặc cài Extension <b>"Cookie Editor"</b> → Export → Header String</li>
+                        </ol>
+                    </div>
+                    <textarea id="cookieInput"
+                        placeholder="Paste cookie string ở đây...&#10;Ví dụ: c_user=123456; xs=abc123; fr=xyz..."
+                        style="width: 100%; height: 80px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); padding: 10px; font-size: 12px; font-family: 'JetBrains Mono', monospace; resize: vertical; box-sizing: border-box;"></textarea>
+                    <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
+                        <button onclick="saveCookie()"
+                            style="background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; transition: all 0.2s;">Lưu
+                            Cookie</button>
+                        <span id="cookieSaveMsg" style="font-size: 12px; color: var(--text-muted);"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="groupIdInput">Group ID</label>
+                    <input type="text" id="groupIdInput" placeholder="Ví dụ: 1234567890">
+                </div>
+                <div class="form-group">
+                    <label for="startDateInput">Từ ngày</label>
+                    <input type="date" id="startDateInput">
+                </div>
+                <div class="form-group">
+                    <label for="endDateInput">Đến ngày</label>
+                    <input type="date" id="endDateInput">
+                </div>
+                <div class="form-group full-width" style="margin-top: 8px;">
+                    <button id="crawlBtn" class="btn-crawl" onclick="startCrawl()">Bắt đầu thu thập</button>
+                </div>
+            </div>
+
+            <div id="statusBox" class="status-box"></div>
+        </div>
+
+        <div class="right-panel">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; position: relative; z-index: 20;">
+                <h3 style="margin: 0; font-size: 16px; white-space: nowrap;">Dữ liệu thu thập được</h3>
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <div style="position: relative; width: 250px;" id="groupFilterContainer">
+                        <input type="text" id="groupFilterInput" placeholder="Tất cả các nhóm..."
+                            onclick="toggleGroupDropdown(event)" onkeyup="handleGroupInputKey(event)"
+                            style="width: 100%; height: 32px; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); padding: 0 12px; font-size: 13px; outline: none;">
+                        <div id="groupDropdownMenu" class="filter-dropdown-menu" style="width: 100%; max-height: 250px; overflow-y: auto; padding: 4px; box-sizing: border-box; top: calc(100% + 4px); display: none;">
+                            <div class="filter-dropdown-item active" onclick="selectGroupFilter('', '')" data-name="tất cả các nhóm">Tất cả các nhóm</div>
+                            <div id="groupDropdownList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="emptyState" class="empty-state">
+                <div class="icon">🔍</div>
+                <div class="text">Chưa có dữ liệu</div>
+                <div class="sub">Nhập Group ID bên trái để bắt đầu cào</div>
+            </div>
+            <div id="resultsContainer" style="display: none; flex-direction: column; flex: 1; overflow: hidden;">
+                <div style="flex: 1; overflow-y: auto; overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
+                        <thead style="background: var(--bg-primary); position: sticky; top: 0; z-index: 10;">
+                            <tr>
+                                <th class="cb-cell" style="padding: 16px 8px; border-bottom: 1px solid var(--border);">
+                                    <input type="checkbox" id="selectAllCb" onchange="toggleSelectAll(this.checked)"
+                                        title="Chọn tất cả">
+                                </th>
+                                <th style="padding: 16px 24px; border-bottom: 1px solid var(--border); min-width: 150px; font-weight: 500; color: var(--text-muted); cursor: pointer; user-select: none;"
+                                    onclick="setSort('author')">Tác giả <span id="sort-author"></span></th>
+                                <th style="padding: 16px 24px; border-bottom: 1px solid var(--border); min-width: 150px; font-weight: 500; color: var(--text-muted); cursor: pointer; user-select: none;"
+                                    onclick="setSort('time')">Giờ đăng <span id="sort-time">▼</span></th>
+                                <th
+                                    style="padding: 16px 16px; border-bottom: 1px solid var(--border); min-width: 130px; font-weight: 500; color: var(--text-muted); user-select: none; position: relative;">
+                                    <div id="statusFilterBtn" class="status-filter-btn"
+                                        onclick="toggleStatusDropdown(event)">
+                                        <span id="statusFilterLabel">Trạng thái</span>
+                                        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                                            <path d="M2 4l3 3 3-3z" />
+                                        </svg>
+                                    </div>
+                                    <div id="statusDropdown" class="filter-dropdown-menu">
+                                        <div class="filter-dropdown-item active" onclick="setStatusFilter('')"
+                                            id="filter-all">
+                                            <span>Tất cả</span>
+                                            <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24"
+                                                fill="none" stroke="currentColor" stroke-width="2"
+                                                stroke-linecap="round" stroke-linejoin="round">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
+                                        </div>
+                                        <div class="filter-dropdown-item" onclick="setStatusFilter('active')"
+                                            id="filter-active">
+                                            <span>🟢 Active</span>
+                                            <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24"
+                                                fill="none" stroke="currentColor" stroke-width="2"
+                                                stroke-linecap="round" stroke-linejoin="round">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
+                                        </div>
+                                        <div class="filter-dropdown-item" onclick="setStatusFilter('inactive')"
+                                            id="filter-inactive">
+                                            <span>🔴 Inactive</span>
+                                            <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24"
+                                                fill="none" stroke="currentColor" stroke-width="2"
+                                                stroke-linecap="round" stroke-linejoin="round">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th style="padding: 16px 24px; border-bottom: 1px solid var(--border); min-width: 150px; font-weight: 500; color: var(--text-muted); cursor: pointer; user-select: none;"
+                                    onclick="setSort('updated')">Cập nhật <span id="sort-updated"></span></th>
+                                <th style="padding: 16px 24px; border-bottom: 1px solid var(--border); min-width: 300px; font-weight: 500; color: var(--text-muted); cursor: pointer; user-select: none;"
+                                    onclick="setSort('content')">Nội dung <span id="sort-content"></span></th>
+                                <th style="padding: 16px 24px; border-bottom: 1px solid var(--border); min-width: 120px; font-weight: 500; color: var(--text-muted); cursor: pointer; user-select: none;"
+                                    onclick="setSort('reaction')">Tương tác <span id="sort-reaction"></span></th>
+                                <th style="padding: 16px 24px; border-bottom: 1px solid var(--border); min-width: 300px; font-weight: 500; color: var(--text-muted); cursor: pointer; user-select: none;"
+                                    onclick="setSort('comment')">Bình luận <span id="sort-comment"></span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="postsList"></tbody>
+                    </table>
+                </div>
+                <div id="paginationControls"
+                    style="display: flex; justify-content: space-between; align-items: center; padding: 16px 32px; border-top: 1px solid var(--border); background: var(--bg-primary);">
+                    <div style="font-size: 13px; color: var(--text-secondary);">
+                        Tổng: <b id="totalPosts" style="color: var(--text-primary);">0</b> bài viết
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button onclick="changePage(-1)" id="prevPageBtn"
+                            style="background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;">&lt;
+                            Trước</button>
+                        <span style="font-size: 13px; color: var(--text-primary);">Trang <b id="currentPage">1</b> / <b
+                                id="totalPages">1</b></span>
+                        <button onclick="changePage(1)" id="nextPageBtn"
+                            style="background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;">Sau
+                            &gt;</button>
+                        <select id="limitSelect" onchange="changeLimit()"
+                            style="background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 8px; border-radius: 6px; font-size: 13px; outline: none; margin-left: 16px;">
+                            <option value="10">10 / trang</option>
+                            <option value="20" selected>20 / trang</option>
+                            <option value="50">50 / trang</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Floating Action Bar -->
+    <div id="fabBar" class="fab-bar">
+        <span class="fab-count" id="fabCount">✅ 0 bài đã chọn</span>
+        <button class="fab-btn" onclick="bulkRefreshPosts()" id="fabRefresh">🔄 Làm mới</button>
+        <button class="fab-btn" onclick="bulkCheckStatus()" id="fabCheck">🔍 Kiểm tra</button>
+        <button class="fab-btn primary" onclick="bulkCrawlComments()" id="fabCrawl">💬 Cào BL</button>
+        <button class="fab-btn" onclick="bulkExportCsv()" id="fabExport">📥 CSV</button>
+        <button class="fab-btn danger" onclick="bulkDelete()" id="fabDelete">🗑️ Xóa</button>
+    </div>
+
+    <!-- Comment Modal -->
+    <div id="commentModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="cmTitle">Bình luận</h3>
+                <button class="modal-close" onclick="closeCommentModal()">✕</button>
+            </div>
+            <div class="modal-body" id="cmBody"></div>
+            <div class="modal-footer" id="cmFooter"></div>
+        </div>
+    </div>
+
+    <script>
+        let pollingInterval = null;
+        let currentSort = 'time';
+        let currentOrder = 'DESC';
+        let currentPosts = [];
+        let currentPage = 1;
+        let currentLimit = 20;
+        let totalPages = 1;
+        
+        // Trạng thái của bộ lọc (bên phải) dùng sessionStorage để mặc định là "Tất cả" khi mở session mới
+        let currentGroupId = sessionStorage.getItem('fb_filterGroupId') || '';
+        let currentGroupName = sessionStorage.getItem('fb_filterGroupName') || '';
+        
+        let selectedPosts = new Set();
+        let currentStatusFilter = '';
+        window.isFeedCrawling = false;
+
+        // ─── Group Filter Dropdown ─────────────────────────────
+        let availableGroups = [];
+        let currentDropdownIndex = -1;
+        
+        async function fetchGroups() {
+            try {
+                const res = await fetch('/api/facebook/groups');
+                const json = await res.json();
+                if (json.status === 'ok') {
+                    availableGroups = json.data || [];
+                    renderGroupDropdown();
+                    
+                    // Prepopulate if currentGroupId exists
+                    if (currentGroupId) {
+                        const matched = availableGroups.find(g => g.group_id === currentGroupId);
+                        if (matched) {
+                            const input = document.getElementById('groupFilterInput');
+                            input.value = matched.group_name || matched.group_id;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Error fetching groups:", e);
+            }
+        }
+
+        function renderGroupDropdown(filterText = '') {
+            const listEl = document.getElementById('groupDropdownList');
+            if (!listEl) return;
+            
+            let html = '';
+            const lowerFilter = filterText.toLowerCase();
+            
+            availableGroups.forEach(g => {
+                const rawName = String(g.group_name || g.group_id || '');
+                const nameLower = rawName.toLowerCase();
+                const groupIdStr = String(g.group_id || '');
+                if (!filterText || nameLower.includes(lowerFilter) || groupIdStr.includes(lowerFilter)) {
+                    const isActive = currentGroupId === g.group_id ? 'active' : '';
+                    
+                    // Highlight match
+                    let displayName = rawName;
+                    if (filterText && nameLower.includes(lowerFilter)) {
+                        const idx = nameLower.indexOf(lowerFilter);
+                        displayName = rawName.substring(0, idx) + '<b>' + rawName.substring(idx, idx + filterText.length) + '</b>' + rawName.substring(idx + filterText.length);
+                    }
+                    
+                    html += `<div class="filter-dropdown-item selectable-item ${isActive}" onclick="selectGroupFilter('${g.group_id}', '${rawName.replace(/'/g, "\\'")}')" data-name="${nameLower}">
+                        <span>${displayName}</span>
+                        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>`;
+                }
+            });
+            listEl.innerHTML = html;
+        }
+
+        function showGroupDropdown() {
+            const dd = document.getElementById('groupDropdownMenu');
+            dd.style.display = 'block';
+            currentDropdownIndex = -1;
+        }
+        
+        function hideGroupDropdown() {
+            const dd = document.getElementById('groupDropdownMenu');
+            dd.style.display = 'none';
+        }
+
+        function toggleGroupDropdown(e) {
+            if (e) e.stopPropagation();
+            const dd = document.getElementById('groupDropdownMenu');
+            if (dd.style.display === 'none' || dd.style.display === '') {
+                showGroupDropdown();
+            } else {
+                hideGroupDropdown();
+            }
+        }
+
+        function handleGroupInputKey(e) {
+            const dd = document.getElementById('groupDropdownMenu');
+            
+            // Re-render list if not navigational key
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') {
+                if (dd.style.display === 'none' || dd.style.display === '') showGroupDropdown();
+                const input = document.getElementById('groupFilterInput');
+                renderGroupDropdown(input.value);
+                
+                // Toggle 'Tất cả các nhóm' visibility based on search
+                const allItem = dd.querySelector('.filter-dropdown-item[data-name="tất cả các nhóm"]');
+                if (allItem) {
+                    allItem.style.display = (!input.value || "tất cả các nhóm".includes(input.value.toLowerCase())) ? 'flex' : 'none';
+                }
+                currentDropdownIndex = -1;
+                return;
+            }
+
+            // Keyboard navigation
+            if (dd.style.display !== 'block') {
+                if (e.key === 'ArrowDown') showGroupDropdown();
+                return;
+            }
+
+            const items = Array.from(dd.querySelectorAll('.filter-dropdown-item')).filter(el => el.style.display !== 'none');
+            
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                currentDropdownIndex = (currentDropdownIndex + 1) % items.length;
+                updateDropdownFocus(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                currentDropdownIndex = (currentDropdownIndex - 1 + items.length) % items.length;
+                updateDropdownFocus(items);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (currentDropdownIndex >= 0 && currentDropdownIndex < items.length) {
+                    items[currentDropdownIndex].click();
+                } else if (items.length > 0) {
+                    items[0].click(); // Auto select first item if none focused
+                }
+            }
+        }
+
+        function updateDropdownFocus(items) {
+            items.forEach((item, idx) => {
+                if (idx === currentDropdownIndex) {
+                    item.style.background = 'rgba(255, 255, 255, 0.1)';
+                    item.scrollIntoView({ block: 'nearest' });
+                } else {
+                    item.style.background = '';
+                }
+            });
+        }
+
+        function selectGroupFilter(groupId, groupName) {
+            currentGroupId = groupId;
+            currentGroupName = groupName;
+            currentPage = 1;
+            
+            // Lưu state của bộ lọc vào session
+            sessionStorage.setItem('fb_filterGroupId', groupId);
+            sessionStorage.setItem('fb_filterGroupName', groupName);
+            
+            const input = document.getElementById('groupFilterInput');
+            input.value = groupName || ''; // Show 'Tất cả các nhóm...' as placeholder if empty
+            
+            // Update active styling
+            document.querySelectorAll('#groupDropdownMenu .filter-dropdown-item').forEach(el => el.classList.remove('active'));
+            if (!currentGroupId && !currentGroupName) {
+                const allItem = document.querySelector('#groupDropdownMenu .filter-dropdown-item[data-name="tất cả các nhóm"]');
+                if (allItem) allItem.classList.add('active');
+            }
+            
+            hideGroupDropdown();
+            
+            // Đồng bộ Group ID sang ô Cào dữ liệu bên trái
+            const sidebarInput = document.getElementById('groupIdInput');
+            if (sidebarInput && groupId !== 'null') {
+                sidebarInput.value = groupId || '';
+                localStorage.setItem('fb_groupId', groupId || '');
+            }
+            
+            fetchResults();
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const dd = document.getElementById('groupDropdownMenu');
+            if (dd && !e.target.closest('#groupFilterContainer')) {
+                hideGroupDropdown();
+            }
+        });
+
+        // Initialize
+        if (currentGroupName) {
+            document.getElementById('groupFilterInput').value = currentGroupName;
+        }
+        fetchGroups();
+
+        function setFeedCrawlingState(isCrawling) {
+            window.isFeedCrawling = isCrawling;
+            document.querySelectorAll('.btn-comment').forEach(btn => {
+                btn.disabled = isCrawling;
+                btn.style.opacity = isCrawling ? '0.5' : '1';
+                btn.title = isCrawling ? 'Hệ thống đang tải feed, vui lòng chờ...' : '';
+                btn.style.cursor = isCrawling ? 'not-allowed' : 'pointer';
+            });
+            const fabCrawl = document.getElementById('fabCrawl');
+            if (fabCrawl) {
+                fabCrawl.disabled = isCrawling;
+                fabCrawl.title = isCrawling ? 'Hệ thống đang tải feed, vui lòng chờ...' : '';
+            }
+        }
+
+        // ─── Cookie Management ──────────────────────────────────
+
+        function toggleCookieSection() {
+            const section = document.getElementById('cookieSection');
+            const arrow = document.getElementById('cookieArrow');
+            if (section.style.display === 'none') {
+                section.style.display = 'block';
+                arrow.style.transform = 'rotate(90deg)';
+            } else {
+                section.style.display = 'none';
+                arrow.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        async function saveCookie() {
+            const cookieStr = document.getElementById('cookieInput').value.trim();
+            const msgEl = document.getElementById('cookieSaveMsg');
+            if (!cookieStr) {
+                msgEl.innerText = '❌ Vui lòng paste cookie!';
+                msgEl.style.color = 'var(--red)';
+                return;
+            }
+
+            // Lưu vào trình duyệt (bảo mật tại Client)
+            localStorage.setItem('fb_cookie', cookieStr);
+            msgEl.innerText = '✅ Cookie đã lưu tại LocalStorage!';
+            msgEl.style.color = 'var(--green)';
+            loadCookieStatus();
+        }
+
+        async function loadCookieStatus() {
+            const statusEl = document.getElementById('cookieStatus');
+            const inputEl = document.getElementById('cookieInput');
+            const localCookie = localStorage.getItem('fb_cookie');
+            if (localCookie) {
+                const has_c_user = localCookie.includes('c_user=');
+                const has_xs = localCookie.includes('xs=');
+                if (has_c_user && has_xs) {
+                    statusEl.innerText = `✅ ${localCookie.length} kí tự`;
+                    statusEl.style.color = 'var(--green)';
+                } else {
+                    statusEl.innerText = `⚠️ Thiếu c_user/xs`;
+                    statusEl.style.color = 'orange';
+                }
+                
+                if (document.activeElement !== inputEl && !inputEl.value) {
+                    inputEl.value = localCookie;
+                }
+            } else {
+                statusEl.innerText = 'Chưa cài đặt';
+                statusEl.style.color = 'var(--text-muted)';
+            }
+        }
+
+        // Load cookie status on page load and poll every 3s
+        loadCookieStatus();
+        setInterval(loadCookieStatus, 3000);
+
+        function setSort(column) {
+            if (currentSort === column) {
+                currentOrder = currentOrder === 'DESC' ? 'ASC' : 'DESC';
+            } else {
+                currentSort = column;
+                currentOrder = 'DESC';
+            }
+            currentPage = 1;
+            updateSortIcons();
+            fetchResults();
+        }
+
+        function changePage(delta) {
+            const newPage = currentPage + delta;
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentPage = newPage;
+                fetchResults();
+            }
+        }
+
+        function changeLimit() {
+            currentLimit = parseInt(document.getElementById('limitSelect').value);
+            currentPage = 1;
+            fetchResults();
+        }
+
+        function updateSortIcons() {
+            ['author', 'time', 'updated', 'content', 'reaction', 'comment'].forEach(col => {
+                const el = document.getElementById(`sort-${col}`);
+                if (el) {
+                    if (col === currentSort) {
+                        el.textContent = currentOrder === 'DESC' ? ' ▼' : ' ▲';
+                    } else {
+                        el.textContent = '';
+                    }
+                }
+            });
+        }
+
+        function startPollingStatus() {
+            const statusBox = document.getElementById('statusBox');
+            statusBox.style.display = 'block';
+            setFeedCrawlingState(true);
+
+            const statusInterval = setInterval(async () => {
+                try {
+                    const statRes = await fetch('/api/facebook/crawl_status');
+                    const statObj = await statRes.json();
+                    const refreshObj = statObj.refresh || statObj;
+                    if (refreshObj.status === 'running') {
+                        statusBox.innerText = `[INFO] Đang tải lại dữ liệu bài viết ${refreshObj.current} / ${refreshObj.total}...`;
+                        statusBox.style.color = 'var(--text-primary)';
+                    } else {
+                        clearInterval(statusInterval);
+                        statusBox.innerText = `[SUCCESS] Hoàn tất làm mới ${refreshObj.total || 0} bài viết!`;
+                        statusBox.style.color = 'var(--green)';
+                        if (pollingInterval) clearInterval(pollingInterval);
+                        fetchResults();
+                        pollingInterval = setInterval(fetchResults, 3000);
+                        setFeedCrawlingState(false);
+                    }
+                } catch (err) {
+                    console.error("Error polling status", err);
+                }
+            }, 1000);
+        }
+
+        async function fetchResults() {
+            try {
+                const groupQuery = currentGroupId ? `&group_id=${encodeURIComponent(currentGroupId)}` : '';
+                const nameQuery = currentGroupName ? `&group_name=${encodeURIComponent(currentGroupName)}` : '';
+                const statusQuery = currentStatusFilter ? `&status=${currentStatusFilter}` : '';
+                
+                const startDate = document.getElementById('startDateInput').value;
+                const endDate = document.getElementById('endDateInput').value;
+                const startDateQuery = startDate ? `&start_date=${encodeURIComponent(startDate)}` : '';
+                const endDateQuery = endDate ? `&end_date=${encodeURIComponent(endDate)}` : '';
+                
+                const res = await fetch(`/api/facebook/results?sort=${currentSort}&order=${currentOrder}&page=${currentPage}&limit=${currentLimit}${groupQuery}${nameQuery}${statusQuery}${startDateQuery}${endDateQuery}`);
+                const json = await res.json();
+                if (json.status === 'ok') {
+                    const tbody = document.getElementById('postsList');
+
+                    document.getElementById('emptyState').style.display = 'none';
+                    document.getElementById('resultsContainer').style.display = 'flex';
+
+                    // Update Pagination UI
+                    document.getElementById('totalPosts').innerText = json.total || 0;
+                    totalPages = Math.ceil((json.total || 0) / currentLimit) || 1;
+                    document.getElementById('currentPage').innerText = currentPage;
+                    document.getElementById('totalPages').innerText = totalPages;
+                    document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+                    document.getElementById('prevPageBtn').style.opacity = currentPage <= 1 ? '0.5' : '1';
+                    document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+                    document.getElementById('nextPageBtn').style.opacity = currentPage >= totalPages ? '0.5' : '1';
+
+                    if (json.data && json.data.length > 0) {
+                        tbody.innerHTML = '';
+                        currentPosts = json.data;
+                        let allSelected = true;
+
+                        json.data.forEach(post => {
+                            const isChecked = selectedPosts.has(post.post_id);
+                            if (!isChecked) allSelected = false;
+
+                            const tr = document.createElement('tr');
+                            tr.style.borderBottom = '1px solid var(--border)';
+
+                            tr.innerHTML = `
+                                <td class="cb-cell" style="padding: 16px 8px; vertical-align: top;">
+                                    <input type="checkbox" class="row-cb" data-postid="${post.post_id}" onchange="toggleRowCb(this)" ${isChecked ? 'checked' : ''}>
+                                </td>
+                                <td style="padding: 16px 24px; vertical-align: top;">
+                                    <div style="display: flex; gap: 12px; align-items: center;">
+                                        <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--bg-tertiary); overflow: hidden; flex-shrink: 0;">
+                                            ${post.avatar_url ? `<img src="${post.avatar_url}" style="width:100%;height:100%;object-fit:cover;" referrerpolicy="no-referrer">` : ''}
+                                        </div>
+                                        <div style="display: flex; flex-direction: column;">
+                                            <b style="color: var(--accent); font-size: 14px;">${post.author_name || 'Ẩn danh'}</b>
+                                            ${post.profile_url ? `<a href="${post.profile_url}" target="_blank" style="font-size: 11px; color: var(--text-secondary); text-decoration: none;">Xem trang cá nhân ↗</a>` : ''}
+                                        </div>
+                                    </div>
+                                </td>
+                                <td style="padding: 16px 24px; vertical-align: top; color: var(--text-primary); font-size: 13px; font-weight: 500;">
+                                    ${post.creation_datetime ? new Date(post.creation_datetime).toLocaleString('vi-VN') : '—'}
+                                </td>
+                                <td style="padding: 16px 16px; vertical-align: top;">
+                                    ${post.is_active === false
+                                    ? '<span class="status-badge inactive" onclick="toggleStatus(\'' + post.post_id + '\', true)">🔴 Inactive</span>'
+                                    : '<span class="status-badge active" onclick="toggleStatus(\'' + post.post_id + '\', false)">🟢 Active</span>'
+                                }
+                                </td>
+                                <td style="padding: 16px 24px; vertical-align: top; color: var(--text-secondary); font-size: 13px;">
+                                    ${post.updated_at ? new Date(post.updated_at).toLocaleString('vi-VN') : '—'}
+                                </td>
+                                <td style="padding: 16px 24px; vertical-align: top;">
+                                    <div style="color: var(--text-primary); line-height: 1.5; margin-bottom: 8px;">
+                                        ${post.message_text ? post.message_text.substring(0, 200).replace(/\\n/g, '<br>') + (post.message_text.length > 200 ? '...' : '') : '<span style="color: var(--text-muted); font-style: italic;">Không có nội dung</span>'}
+                                    </div>
+                                    <a href="${post.permalink_url}" target="_blank" style="font-size: 12px; color: var(--accent); text-decoration: none;">Xem bài viết gốc ↗</a>
+                                </td>
+                                <td style="padding: 16px 24px; vertical-align: top; font-weight: bold; color: var(--text-primary);">
+                                    <div style="margin-bottom: 4px;">👍 ${post.reaction_count || 0}</div>
+                                </td>
+                                <td style="padding: 16px 24px; vertical-align: top;">
+                                    ${(() => {
+                                    let cc = post.comment_count || 0;
+                                    const crawled = post.crawled_comment_count || 0;
+                                    if (crawled > cc) {
+                                        cc = crawled;
+                                    }
+                                    const feedbackId = post.feedback_id || '';
+                                    const disabledAttr = window.isFeedCrawling ? 'disabled style="opacity:0.5;cursor:not-allowed;" title="Hệ thống đang tải feed, vui lòng chờ..."' : '';
+
+                                    if (crawled > 0) {
+                                        return '<button class="btn-comment has-data" ' + disabledAttr + ' onclick="openCommentModal(\'' + post.post_id + '\', \'' + feedbackId + '\', ' + cc + ')">' +
+                                            '💬 ' + crawled + ' / ' + cc + ' đã lấy</button>';
+                                    } else if (cc > 0) {
+                                        return '<div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">' + cc + ' bình luận</div>' +
+                                            '<button class="btn-comment" ' + disabledAttr + ' onclick="openCommentModal(\'' + post.post_id + '\', \'' + feedbackId + '\', ' + cc + ')">' +
+                                            '⬇️ Lấy bình luận</button>';
+                                    } else {
+                                        return '<span style="color: var(--text-muted); font-size: 12px;">0 bình luận</span>';
+                                    }
+                                })()}
+                                </td>
+                            `;
+                            tbody.appendChild(tr);
+                        });
+
+                        const headerCb = document.getElementById('selectAllCb');
+                        if (headerCb) headerCb.checked = (json.data.length > 0 && allSelected);
+                        updateFab();
+
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary); font-size: 14px;">Không có bài viết nào phù hợp với bộ lọc hiện tại</td></tr>';
+                    }
+                }
+            } catch (e) {
+                console.error("Error fetching results", e);
+            }
+        }
+
+
+        async function startCrawl() {
+            const groupId = document.getElementById('groupIdInput').value.trim();
+            const startDate = document.getElementById('startDateInput').value;
+            const endDate = document.getElementById('endDateInput').value;
+            const statusBox = document.getElementById('statusBox');
+
+            if (!groupId) {
+                alert("Vui lòng nhập Group ID!");
+                return;
+            }
+
+            currentGroupId = groupId;
+
+            const btn = document.getElementById('crawlBtn');
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.innerText = 'Đang cào...';
+
+            statusBox.style.display = 'block';
+            statusBox.innerText = 'Đang khởi động tiến trình cào dữ liệu...';
+            setFeedCrawlingState(true);
+
+            try {
+                const response = await fetch('/api/facebook/crawl', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        group_id: groupId,
+                        start_date: startDate,
+                        end_date: endDate,
+                        cookie: localStorage.getItem('fb_cookie') || document.getElementById('cookieInput').value.trim()
+                    })
+                });
+                const result = await response.json();
+                if (result.status === 'ok') {
+                    // Start polling for results
+                    if (pollingInterval) clearInterval(pollingInterval);
+                    fetchResults(); // Fetch immediately once
+                    pollingInterval = setInterval(fetchResults, 3000); // Fetch every 3s
+
+                    // Start polling for real-time status message
+                    const groupStatusInterval = setInterval(async () => {
+                        try {
+                            const statRes = await fetch('/api/facebook/crawl_status');
+                            const statObj = await statRes.json();
+                            const groupObj = statObj.group_crawl;
+
+                            if (groupObj && groupObj.message) {
+                                statusBox.innerText = groupObj.message;
+                                if (groupObj.status === 'error') {
+                                    statusBox.style.color = 'var(--red)';
+                                } else if (groupObj.status === 'fetching_template') {
+                                    statusBox.style.color = 'var(--accent)';
+                                } else {
+                                    statusBox.style.color = 'var(--green)';
+                                }
+                            }
+
+                            if (groupObj && (groupObj.status === 'idle' || groupObj.status === 'error')) {
+                                clearInterval(groupStatusInterval);
+                                btn.disabled = false;
+                                btn.style.opacity = '1';
+                                btn.innerText = 'Bắt đầu thu thập';
+                                if (groupObj.status === 'error') {
+                                    statusBox.style.color = 'var(--red)';
+                                } else {
+                                    statusBox.style.color = 'var(--green)';
+                                }
+                                setFeedCrawlingState(false);
+                            }
+                            
+                            // Toast notification for crawled posts
+                            if (groupObj && groupObj.updated_at && groupObj.updated_at !== window._lastToastTime) {
+                                window._lastToastTime = groupObj.updated_at;
+                                if ((groupObj.last_p_count || 0) > 0 || (groupObj.last_c_count || 0) > 0) {
+                                    showToast(`Đã thu thập <b>${groupObj.last_p_count}</b> bài viết và <b>${groupObj.last_c_count}</b> bình luận mới.`, '🚀');
+                                }
+                            }
+                        } catch (err) {
+                            console.error("Error polling group status", err);
+                        }
+                    }, 1000);
+
+                } else {
+                    statusBox.innerText = `[ERROR] ${result.message}`;
+                    statusBox.style.color = 'var(--red)';
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.innerText = 'Bắt đầu thu thập';
+                }
+            } catch (e) {
+                statusBox.innerText = `[ERROR] Lỗi kết nối: ${e.message}`;
+                statusBox.style.color = 'var(--red)';
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.innerText = 'Bắt đầu thu thập';
+            }
+        }
+
+        function loadState() {
+            if (localStorage.getItem('fb_groupId')) document.getElementById('groupIdInput').value = localStorage.getItem('fb_groupId');
+            if (localStorage.getItem('fb_startDate')) document.getElementById('startDateInput').value = localStorage.getItem('fb_startDate');
+            if (localStorage.getItem('fb_endDate')) document.getElementById('endDateInput').value = localStorage.getItem('fb_endDate');
+        }
+        loadState();
+        
+        // ─── UI Utilities ──────────────────────────────────
+        function showToast(message, icon = '✅') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `
+                <div class="toast-icon">${icon}</div>
+                <div class="toast-content">${message}</div>
+            `;
+            container.appendChild(toast);
+            
+            // Trigger animation
+            setTimeout(() => toast.classList.add('show'), 10);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Set up LocalStorage bindings to preserve UI state
+        const groupIdInput = document.getElementById('groupIdInput');
+        const startDateInput = document.getElementById('startDateInput');
+        const endDateInput = document.getElementById('endDateInput');
+
+        groupIdInput.addEventListener('input', () => localStorage.setItem('fb_groupId', groupIdInput.value));
+        startDateInput.addEventListener('change', () => {
+            localStorage.setItem('fb_startDate', startDateInput.value);
+            fetchResults();
+        });
+        endDateInput.addEventListener('change', () => {
+            localStorage.setItem('fb_endDate', endDateInput.value);
+            fetchResults();
+        });
+
+        if (localStorage.getItem('fb_groupId')) groupIdInput.value = localStorage.getItem('fb_groupId');
+
+        const today = new Date();
+        const lastWeek = new Date(today);
+        lastWeek.setDate(today.getDate() - 7);
+
+        if (localStorage.getItem('fb_startDate')) {
+            startDateInput.value = localStorage.getItem('fb_startDate');
+        } else {
+            startDateInput.value = lastWeek.toISOString().split('T')[0];
+        }
+
+        if (localStorage.getItem('fb_endDate')) {
+            endDateInput.value = localStorage.getItem('fb_endDate');
+        } else {
+            endDateInput.value = today.toISOString().split('T')[0];
+        }
+
+        // Check if there's a running process on page load
+        async function checkRunningStatus() {
+            try {
+                const statRes = await fetch('/api/facebook/crawl_status');
+                const statObj = await statRes.json();
+
+                if (statObj.refresh && statObj.refresh.status === 'running') {
+                    startPollingStatus();
+                }
+                else if (statObj.group_crawl && (statObj.group_crawl.status === 'running' || statObj.group_crawl.status === 'fetching_template')) {
+                    const statusBox = document.getElementById('statusBox');
+                    statusBox.style.display = 'block';
+                    statusBox.innerText = statObj.group_crawl.message;
+                    statusBox.style.color = statObj.group_crawl.status === 'fetching_template'
+                        ? 'var(--text-primary)' : 'var(--green)';
+
+                    const btn = document.getElementById('crawlBtn');
+                    btn.disabled = true;
+                    btn.style.opacity = '0.5';
+                    btn.innerText = statObj.group_crawl.status === 'fetching_template'
+                        ? '🔄 Đang lấy token...' : 'Đang cào...';
+
+                    setFeedCrawlingState(true);
+
+                    if (!pollingInterval) pollingInterval = setInterval(fetchResults, 3000);
+                } else {
+                    setFeedCrawlingState(false);
+                }
+            } catch (e) {
+                console.error("Error checking initial status", e);
+            }
+        }
+
+        checkRunningStatus();
+
+        // Initial fetch in case there is already data
+        fetchResults();
+
+        // ─── Comment Modal ──────────────────────────────────────
+        let _commentPostId = '';
+        let _commentFeedbackId = '';
+        let _commentPollInterval = null;
+
+        function openCommentModal(postId, feedbackId, totalCount) {
+            _commentPostId = postId;
+            _commentFeedbackId = feedbackId;
+            const overlay = document.getElementById('commentModal');
+            overlay.classList.add('active');
+            document.getElementById('cmTitle').textContent = `Bình luận (${totalCount})`;
+            document.getElementById('cmBody').innerHTML = '<div style="text-align:center;padding:40px;"><span class="spinner-sm"></span> Đang tải...</div>';
+            loadComments(postId, totalCount);
+        }
+
+        function closeCommentModal() {
+            document.getElementById('commentModal').classList.remove('active');
+            if (_commentPollInterval) { clearInterval(_commentPollInterval); _commentPollInterval = null; }
+        }
+
+        async function loadComments(postId, totalCount) {
+            try {
+                const res = await fetch(`/api/facebook/comments?post_id=${encodeURIComponent(postId)}`);
+                const json = await res.json();
+                const body = document.getElementById('cmBody');
+                const footer = document.getElementById('cmFooter');
+
+                if (json.status === 'ok' && json.data.length > 0) {
+                    renderComments(json.data, body);
+                    const disabledAttr = window.isFeedCrawling ? 'disabled style="opacity:0.5;cursor:not-allowed;" title="Hệ thống đang tải feed, vui lòng chờ..."' : '';
+                    footer.innerHTML = `<span style="font-size:12px;color:var(--text-muted);">Đã lấy ${json.total} / ${totalCount || '?'} bình luận</span>` +
+                        `<button class="btn-crawl-sm" ${disabledAttr} onclick="startCommentCrawl()">🔄 Cào lại bình luận</button>`;
+                } else {
+                    body.innerHTML = '<div class="comment-empty"><div class="icon">💬</div>' +
+                        '<div>Chưa có bình luận nào được lưu</div>' +
+                        '<div style="font-size:12px;margin-top:4px;">Nhấn nút bên dưới để bắt đầu thu thập</div></div>';
+                    const disabledAttr = window.isFeedCrawling ? 'disabled style="opacity:0.5;cursor:not-allowed;" title="Hệ thống đang tải feed, vui lòng chờ..."' : '';
+                    footer.innerHTML = `<span></span><button class="btn-crawl-sm" ${disabledAttr} onclick="startCommentCrawl()">⬇️ Bắt đầu lấy bình luận</button>`;
+                }
+            } catch (e) {
+                document.getElementById('cmBody').innerHTML = `<div style="padding:20px;color:var(--red);">Lỗi: ${e.message}</div>`;
+            }
+        }
+
+        function renderComments(comments, container) {
+            const toplevel = comments.filter(c => !c.parent_comment_id);
+            const replies = comments.filter(c => c.parent_comment_id);
+            const replyMap = {};
+            replies.forEach(r => {
+                if (!replyMap[r.parent_comment_id]) replyMap[r.parent_comment_id] = [];
+                replyMap[r.parent_comment_id].push(r);
+            });
+
+            let html = '';
+            const renderOne = (c, isReply) => {
+                const time = c.creation_datetime ? new Date(c.creation_datetime).toLocaleString('vi-VN') : '';
+                const bodyText = (c.body_text || '').replace(/\n/g, '<br>');
+                return `<div class="comment-item${isReply ? ' reply' : ''}">
+                    <div class="c-header">
+                        <div class="c-avatar">${c.avatar_url ? '<img src="' + c.avatar_url + '" referrerpolicy="no-referrer">' : ''}</div>
+                        <span class="c-name">${c.author_name || 'Ẩn danh'}</span>
+                        <span class="c-time">${time}</span>
+                    </div>
+                    <div class="c-body">${bodyText || '<i style="color:var(--text-muted)">Không có nội dung</i>'}</div>
+                    <div class="c-meta">
+                        ${c.reaction_count ? '👍 ' + c.reaction_count : ''}
+                        ${c.reply_count ? '↩ ' + c.reply_count + ' trả lời' : ''}
+                    </div>
+                </div>`;
+            };
+
+            toplevel.forEach(c => {
+                html += renderOne(c, false);
+                (replyMap[c.comment_id] || []).forEach(r => { html += renderOne(r, true); });
+            });
+            // Orphaned replies (parent not in this batch)
+            replies.filter(r => !toplevel.find(t => t.comment_id === r.parent_comment_id)).forEach(r => {
+                html += renderOne(r, true);
+            });
+            container.innerHTML = html || '<div class="comment-empty"><div class="icon">💬</div><div>Không có bình luận</div></div>';
+        }
+
+        async function startCommentCrawl() {
+            const btn = document.querySelector('#cmFooter .btn-crawl-sm');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm"></span> Đang cào...'; }
+
+            try {
+                const cookie = localStorage.getItem('fb_cookie') || '';
+                const res = await fetch('/api/facebook/crawl_comments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ post_id: _commentPostId, feedback_id: _commentFeedbackId, cookie })
+                });
+                const json = await res.json();
+                if (json.status !== 'ok') {
+                    alert('Lỗi: ' + json.message);
+                    if (btn) { btn.disabled = false; btn.textContent = '🔄 Thử lại'; }
+                    return;
+                }
+                // Poll for progress
+                _commentPollInterval = setInterval(async () => {
+                    try {
+                        const sRes = await fetch(`/api/facebook/comment_status?post_id=${encodeURIComponent(_commentPostId)}`);
+                        const sJson = await sRes.json();
+                        const p = sJson.progress;
+                        if (btn) btn.innerHTML = `<span class="spinner-sm"></span> ${p.message || 'Đang cào...'}`;
+                        if (p.status === 'done' || p.status === 'error') {
+                            clearInterval(_commentPollInterval); _commentPollInterval = null;
+                            if (btn) { btn.disabled = false; btn.textContent = p.status === 'done' ? '✅ Hoàn tất' : '❌ Lỗi'; }
+                            // Reload comments
+                            loadComments(_commentPostId, 0);
+                            // Refresh post list to update crawled count
+                            fetchResults();
+                        }
+                    } catch (e) { /* ignore polling errors */ }
+                }, 1000);
+            } catch (e) {
+                alert('Lỗi: ' + e.message);
+                if (btn) { btn.disabled = false; btn.textContent = '🔄 Thử lại'; }
+            }
+        }
+
+        // Close modal on overlay click
+        document.getElementById('commentModal').addEventListener('click', (e) => {
+            if (e.target.id === 'commentModal') closeCommentModal();
+        });
+        // Close on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeCommentModal();
+        });
+
+        // ─── Selection & FAB ──────────────────────────────────
+        function getSelectedIds() {
+            return Array.from(selectedPosts);
+        }
+
+        function toggleRowCb(cb) {
+            const id = cb.dataset.postid;
+            if (cb.checked) {
+                selectedPosts.add(id);
+            } else {
+                selectedPosts.delete(id);
+            }
+            updateFab();
+
+            // Sync header checkbox
+            const allCbs = document.querySelectorAll('.row-cb');
+            const headerCb = document.getElementById('selectAllCb');
+            const allChecked = Array.from(allCbs).every(c => c.checked);
+            if (headerCb) headerCb.checked = allCbs.length > 0 && allChecked;
+        }
+
+        function toggleSelectAll(checked) {
+            document.querySelectorAll('.row-cb').forEach(cb => {
+                cb.checked = checked;
+                if (checked) selectedPosts.add(cb.dataset.postid);
+                else selectedPosts.delete(cb.dataset.postid);
+            });
+            updateFab();
+        }
+
+        function updateFab() {
+            const fab = document.getElementById('fabBar');
+            const count = selectedPosts.size;
+            document.getElementById('fabCount').textContent = `✓ ${count} bài đã chọn`;
+            if (count > 0) {
+                fab.classList.add('visible');
+            } else {
+                fab.classList.remove('visible');
+            }
+        }
+
+        // ─── Status Filter ──────────────────────────────────
+        function toggleStatusDropdown(e) {
+            e.stopPropagation();
+            const dd = document.getElementById('statusDropdown');
+            dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const dd = document.getElementById('statusDropdown');
+            if (dd && !e.target.closest('#statusFilterBtn') && !e.target.closest('#statusDropdown')) {
+                dd.style.display = 'none';
+            }
+        });
+
+        function setStatusFilter(filter) {
+            currentStatusFilter = filter;
+            currentPage = 1;
+            // Update active dropdown item
+            document.querySelectorAll('.filter-dropdown-item').forEach(p => p.classList.remove('active'));
+            const id = filter ? `filter-${filter}` : 'filter-all';
+            const el = document.getElementById(id);
+            if (el) el.classList.add('active');
+
+            // Highlight the header icon slightly if a filter is active
+            const icon = document.querySelector('#statusFilterBtn svg');
+            if (icon) {
+                icon.style.color = filter ? 'var(--primary)' : 'currentColor';
+            }
+
+            // Close dropdown
+            document.getElementById('statusDropdown').style.display = 'none';
+            fetchResults();
+        }
+
+        // ─── Toggle Single Post Status ──────────────────────
+        async function toggleStatus(postId, newStatus) {
+            try {
+                await fetch('/api/facebook/post_status', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ post_ids: [postId], is_active: newStatus })
+                });
+                fetchResults();
+            } catch (e) {
+                console.error('Toggle status error:', e);
+            }
+        }
+
+        // ─── Bulk Actions ──────────────────────────────────
+        function getCookie() { return localStorage.getItem('fb_cookie') || ''; }
+
+        async function bulkRefreshPosts() {
+            const ids = getSelectedIds();
+            if (!ids.length) return;
+            const btn = document.getElementById('fabRefresh');
+            btn.disabled = true;
+            btn.textContent = '🔄 Đang làm mới...';
+
+            const statusBox = document.getElementById('statusBox');
+            statusBox.style.display = 'block';
+            statusBox.innerText = `Đang khởi động tiến trình cào lại ${ids.length} bài viết qua Playwright... (có thể mất 1-2 phút)`;
+            setFeedCrawlingState(true);
+
+            try {
+                const res = await fetch('/api/facebook/bulk_action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'refresh', post_ids: ids })
+                });
+                const json = await res.json();
+                if (json.status === 'ok') {
+                    startPollingStatus();
+                    btn.textContent = '🔄 Làm mới';
+                    btn.disabled = false;
+                } else {
+                    statusBox.innerText = `[ERROR] ${json.message}`;
+                    statusBox.style.color = 'var(--red)';
+                    setFeedCrawlingState(false);
+                    btn.textContent = '🔄 Làm mới';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                btn.disabled = false;
+                btn.textContent = '🔄 Làm mới';
+                alert('Lỗi: ' + e.message);
+                setFeedCrawlingState(false);
+            }
+        }
+
+        async function bulkCheckStatus() {
+            const ids = getSelectedIds();
+            if (!ids.length) return;
+            const btn = document.getElementById('fabCheck');
+            btn.disabled = true; btn.textContent = '⏳ Đang kiểm tra...';
+            try {
+                const res = await fetch('/api/facebook/bulk_action', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'check_status', post_ids: ids })
+                });
+                const json = await res.json();
+                if (json.task_id) pollBulkProgress(json.task_id, btn, '🔍 Kiểm tra');
+            } catch (e) { btn.disabled = false; btn.textContent = '🔍 Kiểm tra'; alert('Lỗi: ' + e.message); }
+        }
+
+        async function bulkCrawlComments() {
+            const ids = getSelectedIds();
+            if (!ids.length) return;
+            const btn = document.getElementById('fabCrawl');
+            btn.disabled = true; btn.textContent = '⏳ Đang cào...';
+            try {
+                const res = await fetch('/api/facebook/bulk_action', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'crawl_comments', post_ids: ids, cookie: getCookie() })
+                });
+                const json = await res.json();
+                if (json.task_id) pollBulkProgress(json.task_id, btn, '💬 Cào BL');
+            } catch (e) { btn.disabled = false; btn.textContent = '💬 Cào BL'; alert('Lỗi: ' + e.message); }
+        }
+
+        async function bulkExportCsv() {
+            const ids = getSelectedIds();
+            if (!ids.length) return;
+            try {
+                const res = await fetch('/api/facebook/bulk_action', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'export_csv', post_ids: ids })
+                });
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url;
+                a.download = `facebook_posts_${ids.length}.csv`;
+                a.click(); URL.revokeObjectURL(url);
+            } catch (e) { alert('Lỗi xuất CSV: ' + e.message); }
+        }
+
+
+        async function bulkDelete() {
+            const ids = getSelectedIds();
+            if (!ids.length) return;
+            if (!confirm(`Xóa ${ids.length} bài viết và tất cả bình luận liên quan?\n\nHành động này không thể hoàn tác!`)) return;
+            try {
+                await fetch('/api/facebook/bulk_action', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'delete', post_ids: ids })
+                });
+                selectedPosts.clear();
+                updateFab();
+                fetchResults();
+            } catch (e) { alert('Lỗi: ' + e.message); }
+        }
+
+        function pollBulkProgress(taskId, btn, originalText) {
+            const iv = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/facebook/bulk_status?task_id=${encodeURIComponent(taskId)}`);
+                    const json = await res.json();
+                    const p = json.progress;
+                    if (p.status === 'running') {
+                        btn.textContent = `⏳ ${p.current}/${p.total}`;
+                    } else {
+                        clearInterval(iv);
+                        btn.disabled = false;
+                        btn.textContent = p.status === 'done' ? '✅ Xong!' : originalText;
+                        setTimeout(() => { btn.textContent = originalText; }, 3000);
+                        fetchResults();
+                    }
+                } catch (e) { clearInterval(iv); btn.disabled = false; btn.textContent = originalText; }
+            }, 1500);
+        }
+    </script>
+</body>
+
+</html>
