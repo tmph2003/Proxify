@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { 
+            width: 250px; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            padding: 16px; 
+            text-align: center; 
+            background: #1e1e1e;
+            color: white;
+            margin: 0;
+        }
+        h3 { margin-top: 0; margin-bottom: 16px; font-size: 16px; font-weight: 600; }
+        button { 
+            background: #2563eb; 
+            color: white; 
+            border: none; 
+            padding: 10px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            width: 100%; 
+            font-weight: bold; 
+            transition: background 0.2s;
+        }
+        button:hover { background: #1d4ed8; }
+        #status { 
+            margin-top: 12px; 
+            font-size: 13px; 
+            min-height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h3>🍪 Proxify Extractor</h3>
+    <button id="getCookieBtn">Bắn Cookie vào Proxify</button>
+    <div id="status">Sẵn sàng</div>
+    <script src="popup.js"></script>
+</body>
+</html>

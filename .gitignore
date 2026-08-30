@@ -1,0 +1,42 @@
+# Môi trường và biến cục bộ
+.env
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Thư mục dữ liệu và chứng chỉ cục bộ
+dumps/
+certs/
+
+# Thư mục cấu hình IDE
+.vscode/
+.idea/
+
+# Testing & Packaging
+.pytest_cache/
+.tox/
+.coverage
+build/
+dist/
+*.egg-info/
+
+# Ignore scratch tools
+tools/
+
+# Logs
+logs/
+*.log
+
+# IDE & AI Assistants
+.gemini/
+.codegraph/
+GEMINI.md
+
+scratchs/
+zalo_browser_data/

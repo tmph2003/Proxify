@@ -1,0 +1,12 @@
+{
+  "ignore_extensions": [
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+    ".css", ".js", ".woff", ".woff2", ".ttf", ".eot", ".mp4", ".mp3"
+  ],
+  "ignore_domains": [
+    "events.data.microsoft.com",
+    "exp-tas.com",
+    "google-analytics.com",
+    "doubleclick.net"
+  ]
+}

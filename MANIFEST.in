@@ -1,0 +1,4 @@
+include LICENSE
+include README.md
+include README_vi.md
+recursive-include proxify/templates *.html *.css

@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Proxify Cookie Helper",
+  "version": "1.0",
+  "description": "Lấy cookie Facebook 1 chạm cho Proxify",
+  "permissions": [
+    "cookies",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.facebook.com/",
+    "http://localhost:8888/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

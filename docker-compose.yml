@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  proxify:
+    build: .
+    container_name: proxify_app
+    ports:
+      # Ánh xạ port proxy (8080) và dashboard (8888) ra máy host (local)
+      - "8080:8080"
+      - "8888:8888"
+      - "51920:51820/udp"
+    environment:
+      # Thiết lập PROXY_HOST=0.0.0.0 để container mở kết nối NAT ra bên ngoài
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=8080
+      - DASHBOARD_PORT=8888
+      - COMMIT_BATCH_SIZE=50
+      - COMMIT_INTERVAL=2.0
+      - DUMP_DIR=dumps
+      - SPOOF_DOMAINS=${SPOOF_DOMAINS:-tiktok.com,tiktokv.com,byteoversea.com,tiktokcdn.com,zalo.me,chat.zalo.me,zalo.vn,zalopay.vn,zaloapp.com}
+      - IGNORE_HOSTS=${IGNORE_HOSTS:-captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com}
+      - DB_DSN=postgresql://proxify_user:proxify_pass@db:5432/proxify_db
+    command: ["python", "-m", "proxify"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      # Mount thư mục certs của mitmproxy ra thư mục User của host (ngoài project) để an toàn tuyệt đối
+      - ~/.mitmproxy:/root/.mitmproxy
+      # Mount mã nguồn vào container để không cần build lại khi sửa code/HTML
+      - .:/app
+
+  db:
+    image: postgres:15-alpine
+    container_name: proxify_db
+    environment:
+      - POSTGRES_USER=proxify_user
+      - POSTGRES_PASSWORD=proxify_pass
+      - POSTGRES_DB=proxify_db
+    ports:
+      # Mở port DB ra ngoài nếu bạn muốn dùng DBeaver kết nối vào xem data
+      - "5432:5432"
+    volumes:
+      - proxify_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proxify_user -d proxify_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  proxify_pgdata:
