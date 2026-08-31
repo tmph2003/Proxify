@@ -64,7 +64,12 @@ class FacebookAPI:
             async with self.db_pool.acquire() as conn:
                 groups = await conn.fetch("""
                     SELECT 
-                        MAX(NULLIF(trim(group_id), '')) as group_id, 
+                        MAX(
+                            COALESCE(
+                                NULLIF(trim(group_id), ''), 
+                                substring(permalink_url from '/groups/([^/]+)/')
+                            )
+                        ) as group_id, 
                         trim(group_name) as group_name
                     FROM facebook.posts
                     WHERE group_name IS NOT NULL AND trim(group_name) != ''
