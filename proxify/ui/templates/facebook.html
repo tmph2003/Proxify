@@ -996,7 +996,7 @@
                         displayName = rawName.substring(0, idx) + '<b>' + rawName.substring(idx, idx + filterText.length) + '</b>' + rawName.substring(idx + filterText.length);
                     }
                     
-                    html += `<div class="filter-dropdown-item selectable-item ${isActive}" onclick="selectGroupFilter('${g.group_id}', '${rawName.replace(/'/g, "\\'")}')" data-name="${nameLower}">
+                    html += `<div class="filter-dropdown-item selectable-item ${isActive}" onclick="selectGroupFilter('${g.group_id || ''}', '${rawName.replace(/'/g, "\\'")}')" data-name="${nameLower}">
                         <span>${displayName}</span>
                         <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="20 6 9 17 4 12"></polyline>
@@ -1106,9 +1106,9 @@
             
             // Đồng bộ Group ID sang ô Cào dữ liệu bên trái
             const sidebarInput = document.getElementById('groupIdInput');
-            if (sidebarInput && groupId !== 'null') {
-                sidebarInput.value = groupId || '';
-                localStorage.setItem('fb_groupId', groupId || '');
+            if (sidebarInput) {
+                sidebarInput.value = (groupId === 'null') ? '' : (groupId || '');
+                localStorage.setItem('fb_groupId', sidebarInput.value);
             }
             
             fetchResults();
