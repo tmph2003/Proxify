@@ -19,7 +19,7 @@ class RequestStorage:
 
     def __init__(self, db_dsn: str = DB_DSN):
         self.db_dsn = db_dsn
-        self.db_integration_enabled = False
+        self.db_integration_enabled = os.getenv("DB_INTEGRATION_ENABLED", "false").lower() == "true"
         self.db_allowed_domains = []
         
         self._pool = shared_pool

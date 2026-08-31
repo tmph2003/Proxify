@@ -16,75 +16,14 @@ from typing import Optional
 logger = logging.getLogger("proxify.facebook.token_store")
 
 
-# ── File-based token retrieval ─────────────────────────────────────────
-
+# ── In-Memory Token Store ──────────────────────────────────────────────
+IN_MEMORY_TEMPLATES = {}
 
 async def get_saved_tokens() -> Optional[dict]:
-    """Load saved Facebook tokens from the data directory.
-
-    Checks two locations in order:
-    1. ``<project>/data/tokens_facebook.json`` (Docker volume mount)
-    2. ``<package>/platforms/facebook/tokens.json`` (local fallback)
-
-    Returns:
-        Parsed token dict, or ``None`` if not found.
-    """
-    token_file = Path(__file__).parent.parent.parent.parent / "data" / "tokens_facebook.json"
-    if not token_file.exists():
-        token_file = Path(__file__).parent / "tokens.json"
-        if not token_file.exists():
-            return None
-    try:
-        return json.loads(token_file.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.error(f"Failed to read FB tokens: {e}")
-        return None
-
-
-# ── DB-based cookie retrieval ──────────────────────────────────────────
-
-
-async def get_cookies_and_ua_from_db(pool) -> tuple[dict, str]:
-    """Fetch the most recent Facebook cookies and User-Agent from the request DB.
-
-    Args:
-        pool: Database connection pool (``proxify.database.pool``).
-
-    Returns:
-        Tuple of (cookies_dict, user_agent_string).
-    """
-    cookie_str = ""
-    user_agent = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    )
-    try:
-        with pool.cursor(dict_cursor=True) as cur:
-            cur.execute(
-                "SELECT request_headers FROM public.requests "
-                "WHERE domain LIKE '%facebook.com%' "
-                "AND request_headers ILIKE '%c_user=%' "
-                "AND request_headers ILIKE '%xs=%' "
-                "ORDER BY timestamp_epoch DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            if row and row["request_headers"]:
-                headers = json.loads(row["request_headers"])
-                cookie_str = headers.get("cookie", "") or headers.get("Cookie", "")
-                user_agent = (
-                    headers.get("user-agent", "")
-                    or headers.get("User-Agent", "")
-                    or user_agent
-                )
-    except Exception as e:
-        logger.error(f"[TokenStore] Error fetching cookies from DB: {e}")
-
-    if not cookie_str:
-        tokens = await get_saved_tokens()
-        if tokens:
-            cookie_str = tokens.get("cookie", "")
-
-    return cookie_str, user_agent
+    """Retrieve templates from memory."""
+    if IN_MEMORY_TEMPLATES:
+        return IN_MEMORY_TEMPLATES
+    return None
 
 
 # ── Cookie string parsing ─────────────────────────────────────────────

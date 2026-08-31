@@ -119,6 +119,25 @@
             background: var(--accent-hover);
         }
 
+        .btn-stop {
+            height: 44px;
+            padding: 0 32px;
+            border: 1px solid var(--red);
+            border-radius: 8px;
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--red);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+        }
+
+        .btn-stop:hover {
+            background: var(--red);
+            color: white;
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+        }
+
         .status-box {
             margin-top: 24px;
             padding: 16px;
@@ -644,7 +663,7 @@
         /* ── Toasts ─────────────────────── */
         .toast-container {
             position: fixed;
-            bottom: 24px;
+            top: 24px;
             right: 24px;
             display: flex;
             flex-direction: column;
@@ -653,20 +672,22 @@
         }
 
         .toast {
-            background: var(--bg-card);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.95), rgba(79, 70, 229, 0.95));
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 10px 40px rgba(37, 99, 235, 0.5);
             border-radius: 12px;
             padding: 16px 20px;
-            color: var(--text-primary);
-            font-size: 14px;
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 500;
             display: flex;
             align-items: center;
             gap: 12px;
             transform: translateX(120%);
             opacity: 0;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            min-width: 250px;
+            min-width: 280px;
         }
 
         .toast.show {
@@ -766,7 +787,7 @@
                     <input type="date" id="endDateInput">
                 </div>
                 <div class="form-group full-width" style="margin-top: 8px;">
-                    <button id="crawlBtn" class="btn-crawl" onclick="startCrawl()">Bắt đầu thu thập</button>
+                    <button id="crawlBtn" class="btn-crawl" style="width: 100%; transition: all 0.3s;" onclick="toggleCrawl()">Bắt đầu thu thập</button>
                 </div>
             </div>
 
@@ -1364,6 +1385,37 @@
         }
 
 
+        window.stopCrawl = async function() {
+            const btn = document.getElementById('crawlBtn');
+            btn.innerText = '⏳ Đang dừng...';
+            try {
+                const res = await fetch("/api/facebook/stop_crawl", { method: "POST" });
+                const data = await res.json();
+                if (data.status === "ok") {
+                    showToast(data.message, "🛑");
+                    btn.className = 'btn-crawl';
+                    btn.innerText = 'Bắt đầu thu thập';
+                    setFeedCrawlingState(false);
+                } else {
+                    alert("Lỗi: " + data.message);
+                    btn.innerText = '🛑 Dừng thu thập';
+                }
+            } catch(e) {
+                alert("Lỗi kết nối: " + e);
+                btn.innerText = '🛑 Dừng thu thập';
+            }
+        };
+
+        window.toggleCrawl = function() {
+            if (window.isFeedCrawling) {
+                if (confirm("Bạn có chắc chắn muốn dừng quá trình thu thập không?")) {
+                    window.stopCrawl();
+                }
+            } else {
+                startCrawl();
+            }
+        };
+
         async function startCrawl() {
             const groupId = document.getElementById('groupIdInput').value.trim();
             const startDate = document.getElementById('startDateInput').value;
@@ -1378,9 +1430,8 @@
             currentGroupId = groupId;
 
             const btn = document.getElementById('crawlBtn');
-            btn.disabled = true;
-            btn.style.opacity = '0.5';
-            btn.innerText = 'Đang cào...';
+            btn.className = 'btn-stop';
+            btn.innerText = '🛑 Dừng thu thập';
 
             statusBox.style.display = 'block';
             statusBox.innerText = 'Đang khởi động tiến trình cào dữ liệu...';
@@ -1405,47 +1456,7 @@
                     pollingInterval = setInterval(fetchResults, 3000); // Fetch every 3s
 
                     // Start polling for real-time status message
-                    const groupStatusInterval = setInterval(async () => {
-                        try {
-                            const statRes = await fetch('/api/facebook/crawl_status');
-                            const statObj = await statRes.json();
-                            const groupObj = statObj.group_crawl;
-
-                            if (groupObj && groupObj.message) {
-                                statusBox.innerText = groupObj.message;
-                                if (groupObj.status === 'error') {
-                                    statusBox.style.color = 'var(--red)';
-                                } else if (groupObj.status === 'fetching_template') {
-                                    statusBox.style.color = 'var(--accent)';
-                                } else {
-                                    statusBox.style.color = 'var(--green)';
-                                }
-                            }
-
-                            if (groupObj && (groupObj.status === 'idle' || groupObj.status === 'error')) {
-                                clearInterval(groupStatusInterval);
-                                btn.disabled = false;
-                                btn.style.opacity = '1';
-                                btn.innerText = 'Bắt đầu thu thập';
-                                if (groupObj.status === 'error') {
-                                    statusBox.style.color = 'var(--red)';
-                                } else {
-                                    statusBox.style.color = 'var(--green)';
-                                }
-                                setFeedCrawlingState(false);
-                            }
-                            
-                            // Toast notification for crawled posts
-                            if (groupObj && groupObj.updated_at && groupObj.updated_at !== window._lastToastTime) {
-                                window._lastToastTime = groupObj.updated_at;
-                                if ((groupObj.last_p_count || 0) > 0 || (groupObj.last_c_count || 0) > 0) {
-                                    showToast(`Đã thu thập <b>${groupObj.last_p_count}</b> bài viết và <b>${groupObj.last_c_count}</b> bình luận mới.`, '🚀');
-                                }
-                            }
-                        } catch (err) {
-                            console.error("Error polling group status", err);
-                        }
-                    }, 1000);
+                    pollGroupStatus();
 
                 } else {
                     statusBox.innerText = `[ERROR] ${result.message}`;
@@ -1524,6 +1535,57 @@
             endDateInput.value = today.toISOString().split('T')[0];
         }
 
+        let groupStatusInterval = null;
+        function pollGroupStatus() {
+            if (groupStatusInterval) clearInterval(groupStatusInterval);
+            const statusBox = document.getElementById('statusBox');
+            const btn = document.getElementById('crawlBtn');
+            
+            groupStatusInterval = setInterval(async () => {
+                try {
+                    const statRes = await fetch('/api/facebook/crawl_status');
+                    const statObj = await statRes.json();
+                    const groupObj = statObj.group_crawl;
+
+                    if (groupObj && groupObj.message) {
+                        statusBox.innerText = groupObj.message;
+                        if (groupObj.status === 'error') {
+                            statusBox.style.color = 'var(--red)';
+                        } else if (groupObj.status === 'fetching_template') {
+                            statusBox.style.color = 'var(--accent)';
+                        } else {
+                            statusBox.style.color = 'var(--green)';
+                        }
+                    }
+
+                    if (groupObj && (groupObj.status === 'idle' || groupObj.status === 'error')) {
+                        clearInterval(groupStatusInterval);
+                        groupStatusInterval = null;
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                        btn.className = 'btn-crawl';
+                        btn.innerText = 'Bắt đầu thu thập';
+                        if (groupObj.status === 'error') {
+                            statusBox.style.color = 'var(--red)';
+                        } else {
+                            statusBox.style.color = 'var(--green)';
+                        }
+                        setFeedCrawlingState(false);
+                    }
+                    
+                    // Toast notification for crawled posts
+                    if (groupObj && groupObj.updated_at && groupObj.updated_at !== window._lastToastTime) {
+                        window._lastToastTime = groupObj.updated_at;
+                        if ((groupObj.last_p_count || 0) > 0 || (groupObj.last_c_count || 0) > 0) {
+                            showToast(`Đã thu thập <b>${groupObj.last_p_count}</b> bài viết và <b>${groupObj.last_c_count}</b> bình luận mới.`, '🚀');
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error polling group status", err);
+                }
+            }, 1000);
+        }
+
         // Check if there's a running process on page load
         async function checkRunningStatus() {
             try {
@@ -1541,14 +1603,15 @@
                         ? 'var(--text-primary)' : 'var(--green)';
 
                     const btn = document.getElementById('crawlBtn');
-                    btn.disabled = true;
-                    btn.style.opacity = '0.5';
-                    btn.innerText = statObj.group_crawl.status === 'fetching_template'
-                        ? '🔄 Đang lấy token...' : 'Đang cào...';
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.className = 'btn-stop';
+                    btn.innerText = '🛑 Dừng thu thập';
 
                     setFeedCrawlingState(true);
 
                     if (!pollingInterval) pollingInterval = setInterval(fetchResults, 3000);
+                    pollGroupStatus();
                 } else {
                     setFeedCrawlingState(false);
                 }

@@ -321,26 +321,45 @@ class DocumentLinker:
                         break
 
         # Now UPSERT in correct order: Authors -> Posts -> Comments
-        total_posts, total_comments = 0, 0
+        new_posts, new_comments = 0, 0
         
         try:
             with fb_db.pool.cursor() as cur:
+                # Find existing posts
+                post_ids = [p["post_id"] for p in posts if p.get("post_id")]
+                existing_posts = set()
+                if post_ids:
+                    cur.execute("SELECT post_id FROM facebook.posts WHERE post_id = ANY(%s)", (post_ids,))
+                    existing_posts = {row[0] for row in cur.fetchall()}
+                
+                # Find existing comments
+                comment_ids = [c["comment_id"] for c in comments if c.get("comment_id")]
+                existing_comments = set()
+                if comment_ids:
+                    cur.execute("SELECT comment_id FROM facebook.comments WHERE comment_id = ANY(%s)", (comment_ids,))
+                    existing_comments = {row[0] for row in cur.fetchall()}
+
+                seen_posts_in_batch = set()
                 for p in posts:
                     if p.get("author"):
                         fb_db.authors.upsert(p["author"], cursor=cur)
                     fb_db.posts.upsert(p, cursor=cur)
-                    total_posts += 1
                     
+                    pid = p.get("post_id")
+                    if pid and pid not in existing_posts and pid not in seen_posts_in_batch:
+                        new_posts += 1
+                        seen_posts_in_batch.add(pid)
+                    
+                seen_comments_in_batch = set()
                 for c in comments:
                     if c.get("author"):
                         fb_db.authors.upsert(c["author"], cursor=cur)
-                    # Fallback post_id if not found via Linking (this requires parent_id to exist in DB for Replies)
+                    # Fallback post_id if not found via Linking
                     post_id_val = c.get('post_id')
                     
-                    # We rewrite the comment dictionary slightly to match what db expects
                     db_comment = {
                         "comment_id": c["comment_id"],
-                        "parent_comment_id": c["parent_id"], # Here we set the Adjacency List pointer!
+                        "parent_comment_id": c["parent_id"],
                         "author": c["author"],
                         "body_text": c["body_text"],
                         "creation_time": c["creation_time"],
@@ -349,11 +368,15 @@ class DocumentLinker:
                     }
                     
                     fb_db.comments.upsert(db_comment, post_id_val, cursor=cur)
-                    total_comments += 1
+                    
+                    cid = c.get("comment_id")
+                    if cid and cid not in existing_comments and cid not in seen_comments_in_batch:
+                        new_comments += 1
+                        seen_comments_in_batch.add(cid)
         except Exception as e:
             logger.error(f"Error during link_and_upsert: {e}")
             
-        return total_posts, total_comments
+        return new_posts, new_comments
 
 
 # ─── Pipeline chạy trích xuất ──────────────────────────────────────────────

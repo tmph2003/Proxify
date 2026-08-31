@@ -251,31 +251,35 @@ class StealthSessionManager:
         session = await self.get_session()
 
         # Merge base headers and sanitize
-        raw_headers = self._base_headers.copy()
-        if headers:
-            raw_headers.update(headers)
-            
-        clean_headers = sanitize_headers(raw_headers)
+        clean_headers = sanitize_headers(headers or {})
+        if self._base_headers:
+            for k, v in self._base_headers.items():
+                if k.lower() not in clean_headers:
+                    clean_headers[k.lower()] = v
         
-        # Dynamically adjust Sec-Ch-Ua and Sec-Ch-Ua-Platform if User-Agent is provided
-        # This prevents Checkpoint triggers when impersonate is Mac/Chrome150 but UA is Windows/Chrome152
-        ua = clean_headers.get("User-Agent", "")
+        # FIX OS FINGERPRINT MISMATCH: curl_cffi defaults to macOS for chrome120.
+        # We must dynamically adjust Sec-Ch-Ua and Sec-Ch-Ua-Platform based on the User-Agent.
+        # This prevents Facebook Checkpoint triggers (Error 1357001).
+        ua = clean_headers.get("user-agent") or clean_headers.get("User-Agent") or ""
         if ua:
             import re
             m = re.search(r"Chrome/(\d+)", ua)
             if m:
                 version = m.group(1)
-                clean_headers["Sec-Ch-Ua"] = f'"Chromium";v="{version}", "Google Chrome";v="{version}", "Not;A=Brand";v="99"'
+                clean_headers["sec-ch-ua"] = f'"Chromium";v="{version}", "Google Chrome";v="{version}", "Not;A=Brand";v="99"'
                 
-            if "Windows" in ua:
-                clean_headers["Sec-Ch-Ua-Platform"] = '"Windows"'
-                clean_headers["Sec-Ch-Ua-Mobile"] = "?0"
-            elif "Macintosh" in ua:
-                clean_headers["Sec-Ch-Ua-Platform"] = '"macOS"'
-                clean_headers["Sec-Ch-Ua-Mobile"] = "?0"
-            elif "Android" in ua:
-                clean_headers["Sec-Ch-Ua-Platform"] = '"Android"'
-                clean_headers["Sec-Ch-Ua-Mobile"] = "?1"
+            if "Windows" in ua or "windows" in ua.lower():
+                clean_headers["sec-ch-ua-platform"] = '"Windows"'
+                clean_headers["sec-ch-ua-mobile"] = "?0"
+            elif "Macintosh" in ua or "mac os" in ua.lower():
+                clean_headers["sec-ch-ua-platform"] = '"macOS"'
+                clean_headers["sec-ch-ua-mobile"] = "?0"
+            elif "Linux" in ua or "linux" in ua.lower():
+                clean_headers["sec-ch-ua-platform"] = '"Linux"'
+                clean_headers["sec-ch-ua-mobile"] = "?0"
+            elif "Android" in ua or "android" in ua.lower():
+                clean_headers["sec-ch-ua-platform"] = '"Android"'
+                clean_headers["sec-ch-ua-mobile"] = "?1"
 
         effective_timeout = timeout or self._timeout
 
@@ -362,6 +366,7 @@ class StealthSessionManager:
                     headers=resp_headers,
                     is_blocked=False,
                     attempts=attempt + 1,
+                    url=str(resp.url),
                 )
 
             except Exception as e:
@@ -448,7 +453,7 @@ class StealthSessionManager:
 class StealthResponse:
     """Wrapper around a curl_cffi response with additional metadata."""
 
-    __slots__ = ("status_code", "content", "headers", "is_blocked", "attempts")
+    __slots__ = ("status_code", "content", "headers", "is_blocked", "attempts", "url")
 
     def __init__(
         self,
@@ -457,12 +462,14 @@ class StealthResponse:
         headers: dict,
         is_blocked: bool = False,
         attempts: int = 1,
+        url: str = "",
     ):
         self.status_code = status_code
         self.content = content
         self.headers = headers
         self.is_blocked = is_blocked
         self.attempts = attempts
+        self.url = url
 
     @property
     def text(self) -> str:

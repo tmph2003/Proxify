@@ -30,6 +30,8 @@ services:
       - ~/.mitmproxy:/root/.mitmproxy
       # Mount mã nguồn vào container để không cần build lại khi sửa code/HTML
       - .:/app
+      # Mount CloakBrowser (Thư mục đã được copy vào Proxify) để code live
+      - ./CloakBrowser:/app/CloakBrowser
 
   db:
     image: postgres:15-alpine

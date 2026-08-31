@@ -85,8 +85,9 @@ class AsyncEventBus:
             return
             
         try:
+            import json
             # Prepare records for asyncpg (must match columns: topic, data, created_at)
-            records = [(item['topic'], str(item['data']), item['timestamp']) for item in batch]
+            records = [(item['topic'], json.dumps(item['data']), item['timestamp']) for item in batch]
             
             # Use executemany for now. For absolute max speed, copy_records_to_table is better.
             async with self.db_pool.acquire() as conn:

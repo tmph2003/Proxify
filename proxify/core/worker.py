@@ -108,41 +108,31 @@ class BackgroundWorker:
         await asyncio.to_thread(_parse_and_insert)
 
     async def _handle_fb_graphql(self, payload: dict):
-        """Updates the saved GraphQL tokens."""
+        """Updates the saved GraphQL tokens IN MEMORY ONLY."""
         friendly_name = payload.get("friendly_name", "")
         if not friendly_name:
             return
             
         try:
-            existing = {}
-            if self.token_file.exists():
-                existing = json.loads(self.token_file.read_text())
-                
+            from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+            
             tokens = {
                 "headers": payload.get("headers", {}),
                 "form_data": payload.get("form_data", {})
             }
             
-            updated = False
             if "GroupsCometFeed" in friendly_name:
-                existing["feed"] = tokens
-                existing["headers"] = tokens["headers"]
-                existing["form_data"] = tokens["form_data"]
-                updated = True
-                logger.info(f"Worker: Updated Facebook Feed Template! ({friendly_name})")
+                IN_MEMORY_TEMPLATES["feed"] = tokens
+                IN_MEMORY_TEMPLATES["headers"] = tokens["headers"]
+                IN_MEMORY_TEMPLATES["form_data"] = tokens["form_data"]
+                logger.info(f"Worker: Updated Facebook Feed Template IN MEMORY! ({friendly_name})")
             elif "comment" in friendly_name.lower() or "ufi" in friendly_name.lower():
                 if "repl" in friendly_name.lower():
-                    existing["reply"] = tokens
-                    updated = True
-                    logger.info(f"Worker: Updated Facebook Reply Template! ({friendly_name})")
+                    IN_MEMORY_TEMPLATES["reply"] = tokens
+                    logger.info(f"Worker: Updated Facebook Reply Template IN MEMORY! ({friendly_name})")
                 else:
-                    existing["comment"] = tokens
-                    updated = True
-                    logger.info(f"Worker: Updated Facebook Comment Template! ({friendly_name})")
-                    
-            if updated:
-                # Run file IO in thread to avoid blocking loop
-                await asyncio.to_thread(self.token_file.write_text, json.dumps(existing, indent=2))
+                    IN_MEMORY_TEMPLATES["comment"] = tokens
+                    logger.info(f"Worker: Updated Facebook Comment Template IN MEMORY! ({friendly_name})")
         except Exception as e:
             logger.error(f"Template parsing error in worker: {e}")
 

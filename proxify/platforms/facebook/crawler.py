@@ -27,7 +27,7 @@ from proxify.platforms.facebook.delay import (
     comment_delay,
 )
 from proxify.platforms.facebook.session_state import SessionStateManager
-from proxify.platforms.facebook.token_store import get_saved_tokens, get_cookies_and_ua_from_db, extract_templates
+from proxify.platforms.facebook.token_store import get_saved_tokens, extract_templates
 from proxify.platforms.facebook.extractor import extract_from_responses, DataHelper
 from proxify.platforms.facebook.network import GlobalNetworkClient
 from proxify.platforms.facebook.observer import state_observer
@@ -122,13 +122,13 @@ class FacebookCrawler:
         # Cache: group_id → group_name (detected once, reused for all pages)
         self._group_name_cache: dict[str, str] = {}
         
-        # Internal Queue for single worker (Command Pattern)
+        self._stop_flag = False
         self._command_queue = asyncio.Queue()
         try:
-            self._worker_task = asyncio.create_task(self._api_worker_loop())
+            loop = asyncio.get_running_loop()
+            self._worker_task = loop.create_task(self._api_worker_loop())
         except RuntimeError:
             self._worker_task = None
-
     @property
     def manager(self) -> StealthSessionManager:
         return self.network_client.manager
@@ -165,10 +165,20 @@ class FacebookCrawler:
         reset_cursor: bool = True,
     ) -> None:
         """Facade: Enqueues a CrawlFeedCommand to the API worker."""
+        self._stop_flag = False
         if self._worker_task is None:
             self._worker_task = asyncio.create_task(self._api_worker_loop())
         cmd = CrawlFeedCommand(self, group_id, start_timestamp, end_timestamp, template, client_cookie, reset_cursor)
         await self._command_queue.put(cmd)
+
+    def stop_crawling(self) -> None:
+        """Signal the crawler to stop the current loop."""
+        self._stop_flag = True
+        logger.info("[Crawler] Receive STOP signal.")
+        self.crawl_state.update(
+            status="stopped",
+            message="⛔ Đã dừng quá trình thu thập dữ liệu (do người dùng hủy)."
+        )
 
     async def _execute_crawl_group_feed(
         self,
@@ -192,11 +202,33 @@ class FacebookCrawler:
         tokens = template or await get_saved_tokens()
         if not tokens:
             logger.error("No FB template found. Browse a Facebook Group through Proxify first.")
+            self.crawl_state.update(
+                status="error",
+                message=(
+                    "❌ Extension chưa bắt được gói tin GraphQL thực.\n\n"
+                    "⚠️ Hướng dẫn khắc phục:\n"
+                    "1. Vui lòng mở Facebook trong trình duyệt.\n"
+                    "2. Truy cập vào MỘT NHÓM FACEBOOK BẤT KỲ.\n"
+                    "3. Cuộn chuột lướt xuống vài bài viết để Extension tự động bắt gói dữ liệu.\n"
+                    "4. Sau đó quay lại đây và bấm 'Bắt đầu thu thập' một lần nữa!"
+                )
+            )
             return
 
         feed_tpl, comment_tpl, reply_tpl = extract_templates(tokens)
         if not feed_tpl or "form_data" not in feed_tpl:
             logger.error("No FB Feed template found. Browse a Facebook Group through Proxify first.")
+            self.crawl_state.update(
+                status="error",
+                message=(
+                    "❌ Extension chưa bắt được gói tin GraphQL thực.\n\n"
+                    "⚠️ Hướng dẫn khắc phục:\n"
+                    "1. Vui lòng mở Facebook trong trình duyệt.\n"
+                    "2. Truy cập vào MỘT NHÓM FACEBOOK BẤT KỲ.\n"
+                    "3. Cuộn chuột lướt xuống vài bài viết để Extension tự động bắt gói dữ liệu.\n"
+                    "4. Sau đó quay lại đây và bấm 'Bắt đầu thu thập' một lần nữa!"
+                )
+            )
             return
 
         logger.info(
@@ -235,6 +267,10 @@ class FacebookCrawler:
         consecutive_old_pages = 0
 
         for page_num in range(MAX_PAGES_PER_SESSION):
+            if self._stop_flag:
+                logger.info("[Crawler] Stop flag detected. Breaking feed loop.")
+                break
+
             # Circuit breaker gate
             if not crawl_breaker.allow_request():
                 remaining = crawl_breaker.remaining_cooldown
@@ -388,10 +424,11 @@ class FacebookCrawler:
             f"Crawler finished. requests={stats['total_requests']}, "
             f"blocks={stats['total_blocks']}, block_rate={stats['block_rate']}"
         )
-        self.crawl_state.update(
-            status="idle",
-            message=f"Hoàn tất thu thập cho Group ID: {group_id}",
-        )
+        if self.crawl_state.get("status") == "running":
+            self.crawl_state.update({
+                "status": "idle",
+                "message": f"Hoàn tất thu thập cho Group ID: {group_id}",
+            })
 
     async def crawl_specific_posts(self, urls: list[str], template: Optional[dict] = None, client_cookie: Optional[str] = None) -> dict:
         """Facade: Enqueues a RefreshCommand to the API worker."""
@@ -493,19 +530,26 @@ class FacebookCrawler:
     async def _resolve_cookie(client_cookie: Optional[str], tokens: dict) -> str:
         """Resolve cookie string from available sources (priority chain).
         Priority:
-        1. client_cookie (user provided)
-        2. Database (most recent live login)
-        3. tokens.json (cached template cookie)
+        1. client_cookie (user provided via UI)
+        2. Template cookie (perfect cryptographic match with fb_dtsg/spin_t)
+        3. Database (most recent live login)
         """
-        if client_cookie:
+        # Highest priority: user provided cookie
+        if client_cookie and "c_user=" in client_cookie and "xs=" in client_cookie:
             logger.info("[Crawler] Using user-provided fallback cookie")
             return client_cookie.strip()
 
-        from proxify.platforms.facebook.token_store import get_cookies_and_ua_from_db
-        db_cookie, _ = await get_cookies_and_ua_from_db(shared_pool)
-        if db_cookie:
-            logger.info("[Crawler] Using live-intercepted cookie from database")
-            return db_cookie.strip()
+        logger.info(f"[_resolve_cookie] Debug tokens keys: {list(tokens.keys()) if tokens else 'None'}")
+        if tokens:
+            for key in ["feed", "comment", "reply"]:
+                if key in tokens and isinstance(tokens[key], dict) and "headers" in tokens[key]:
+                    headers_keys = list(tokens[key]["headers"].keys())
+                    logger.info(f"[_resolve_cookie] Debug {key} headers keys: {headers_keys}")
+                    # mitmproxy lowercases headers
+                    tpl_cookie = tokens[key]["headers"].get("cookie") or tokens[key]["headers"].get("Cookie")
+                    if tpl_cookie:
+                        logger.info(f"[Crawler] Using exact matching cookie from '{key}' template")
+                        return tpl_cookie.strip()
 
         logger.error("[Crawler] No cookies found!")
         return ""

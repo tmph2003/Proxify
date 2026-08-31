@@ -1,5 +1,5 @@
 """
-Facebook Template Fetcher — Auto-fresh GraphQL templates via Playwright
+Facebook Template Fetcher â€” Auto-fresh GraphQL templates via Playwright
 ========================================================================
 Opens a headless Chromium, injects cookies from the proxy database,
 navigates to the target Facebook Group, and intercepts the first
@@ -108,7 +108,7 @@ async def fetch_fresh_template(group_id: str) -> Optional[dict]:
     Returns a dict with keys: {headers, form_data, feed, comment}
     or None if the template could not be captured.
     """
-    from playwright.async_api import async_playwright
+    from cloakbrowser import launch_async
 
     cookies, user_agent = await _get_fb_cookies_from_db()
     if not cookies:
@@ -116,7 +116,7 @@ async def fetch_fresh_template(group_id: str) -> Optional[dict]:
                       "Please paste your cookie in the Facebook Extractor UI.")
         return None
 
-    logger.info(f"🎭 Launching Playwright to fetch fresh template for group {group_id}")
+    logger.info(f"ðŸŽ­ Launching Playwright to fetch fresh template for group {group_id}")
 
     captured_template = {}
     capture_event = asyncio.Event()
@@ -138,11 +138,27 @@ async def fetch_fresh_template(group_id: str) -> Optional[dict]:
                 return
 
             # Parse form data
-            parsed = parse_qs(post_data, keep_blank_values=True)
-            # Flatten single-value lists
-            form_data = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+            form_data = {}
+            if "Content-Disposition: form-data" in post_data:
+                import re
+                boundary = post_data.split('\n', 1)[0].strip()
+                parts = post_data.split(boundary)
+                for part in parts:
+                    name_match = re.search(r'name="([^"]+)"', part)
+                    if name_match:
+                        name = name_match.group(1)
+                        val_split = re.split(r'\r?\n\r?\n', part, maxsplit=1)
+                        if len(val_split) == 2:
+                            form_data[name] = val_split[1].rstrip('\r\n-')
+            else:
+                parsed = parse_qs(post_data, keep_blank_values=True)
+                form_data = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
 
             friendly_name = form_data.get("fb_api_req_friendly_name", "")
+            logger.info(f"[DEBUG] Intercepted GraphQL request with friendly_name: {friendly_name}")
+            
+            with open("/app/graphql_names.log", "a", encoding="utf-8") as f:
+                f.write(f"Intercepted: {friendly_name}\n")
 
             # We only want the feed query
             if "GroupsCometFeed" not in friendly_name:
@@ -151,7 +167,7 @@ async def fetch_fresh_template(group_id: str) -> Optional[dict]:
             if "fb_dtsg" not in form_data:
                 return
 
-            # Extract headers — strip anything that reveals Playwright/automation
+            # Extract headers â€” strip anything that reveals Playwright/automation
             _skip_headers = {
                 "content-length", "accept-encoding", "host",
                 "connection", "transfer-encoding",
@@ -181,7 +197,7 @@ async def fetch_fresh_template(group_id: str) -> Optional[dict]:
             captured_template["form_data"] = form_data
 
             logger.info(
-                f"✅ Captured fresh feed template! "
+                f"âœ… Captured fresh feed template! "
                 f"friendly_name={friendly_name}, "
                 f"doc_id={form_data.get('doc_id', 'N/A')}"
             )
@@ -203,8 +219,21 @@ async def fetch_fresh_template(group_id: str) -> Optional[dict]:
             if not post_data:
                 return
 
-            parsed = parse_qs(post_data, keep_blank_values=True)
-            form_data = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+            form_data = {}
+            if "Content-Disposition: form-data" in post_data:
+                import re
+                boundary = post_data.split('\n', 1)[0].strip()
+                parts = post_data.split(boundary)
+                for part in parts:
+                    name_match = re.search(r'name="([^"]+)"', part)
+                    if name_match:
+                        name = name_match.group(1)
+                        val_split = re.split(r'\r?\n\r?\n', part, maxsplit=1)
+                        if len(val_split) == 2:
+                            form_data[name] = val_split[1].rstrip('\r\n-')
+            else:
+                parsed = parse_qs(post_data, keep_blank_values=True)
+                form_data = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
             friendly_name = form_data.get("fb_api_req_friendly_name", "")
 
             if "fb_dtsg" not in form_data:
@@ -232,176 +261,171 @@ async def fetch_fresh_template(group_id: str) -> Optional[dict]:
                         "headers": headers,
                         "form_data": form_data,
                     }
-                    logger.info(f"✅ Captured fresh reply template! ({friendly_name})")
+                    logger.info(f"âœ… Captured fresh reply template! ({friendly_name})")
                 else:
                     captured_template["comment"] = {
                         "headers": headers,
                         "form_data": form_data,
                     }
-                    logger.info(f"✅ Captured fresh comment template! ({friendly_name})")
+                    logger.info(f"âœ… Captured fresh comment template! ({friendly_name})")
         except Exception:
             pass
 
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-infobars",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                ],
+        browser = await launch_async(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        )
+
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            user_agent=user_agent,
+            ignore_https_errors=True,
+            extra_http_headers={
+                "sec-ch-ua-platform": '"Windows"',
+                "accept-language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+            }
+        )
+        # Spoof navigator.platform to prevent Facebook OS mismatch detection
+        await context.add_init_script("Object.defineProperty(navigator, 'platform', {get: () => 'Win32'})")
+
+        # Inject cookies from proxy database
+        await context.add_cookies(cookies)
+        logger.info(f"ðŸª Injected {len(cookies)} cookies into Playwright context")
+
+        page = await context.new_page()
+
+        # Register interceptors
+        page.on("request", _on_request)
+        page.on("request", _on_comment_request)
+
+        # Navigate to the group (Force CHRONOLOGICAL sorting to ensure we crawl from newest to oldest)
+        group_url = f"https://www.facebook.com/groups/{group_id}?sorting_setting=CHRONOLOGICAL"
+        logger.info(f"🌍 Navigating to {group_url}")
+
+        try:
+            await page.goto(
+                group_url,
+                wait_until="domcontentloaded",
+                timeout=60000
             )
+        except Exception as e:
+            logger.warning(f"Page load may have timed out (continuing): {e}")
 
-            context = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
-                user_agent=user_agent,
-                ignore_https_errors=True,
-                extra_http_headers={
-                    "sec-ch-ua-platform": '"Windows"',
-                    "accept-language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-                }
+        # Check if we got redirected to login
+        current_url = page.url
+        if "/login" in current_url or "/checkpoint" in current_url:
+            logger.error(
+                "âŒ Facebook redirected to login page. "
+                "Cookies may be expired. Please browse Facebook "
+                "through Proxify to refresh cookies."
             )
-            # Spoof navigator.platform to prevent Facebook OS mismatch detection
-            await context.add_init_script("Object.defineProperty(navigator, 'platform', {get: () => 'Win32'})")
-
-            # Inject cookies from proxy database
-            await context.add_cookies(cookies)
-            logger.info(f"🍪 Injected {len(cookies)} cookies into Playwright context")
-
-            page = await context.new_page()
-
-            # Register interceptors
-            page.on("request", _on_request)
-            page.on("request", _on_comment_request)
-
-            # Navigate to the group (Force CHRONOLOGICAL sorting to ensure we crawl from newest to oldest)
-            group_url = f"https://www.facebook.com/groups/{group_id}?sorting_setting=CHRONOLOGICAL"
-            logger.info(f"🌐 Navigating to {group_url}")
-
             try:
-                await page.goto(
-                    group_url,
-                    wait_until="domcontentloaded",
-                    timeout=PAGE_LOAD_TIMEOUT,
-                )
-            except Exception as e:
-                logger.warning(f"Page load may have timed out (continuing): {e}")
+                await page.screenshot(path="/app/scratchs/fb_redirect.png")
+                logger.info("ðŸ“¸ Saved screenshot of login redirect to /app/scratchs/fb_redirect.png")
+            except:
+                pass
+            await browser.close()
+            return None
 
-            # Check if we got redirected to login
-            current_url = page.url
-            if "/login" in current_url or "/checkpoint" in current_url:
-                logger.error(
-                    "❌ Facebook redirected to login page. "
-                    "Cookies may be expired. Please browse Facebook "
-                    "through Proxify to refresh cookies."
-                )
-                try:
-                    await page.screenshot(path="/app/scratchs/fb_redirect.png")
-                    logger.info("📸 Saved screenshot of login redirect to /app/scratchs/fb_redirect.png")
-                except:
-                    pass
-                await browser.close()
-                return None
-
-            scroll_task = None
-            # Wait for the feed GraphQL request
-            if not capture_event.is_set():
-                logger.info("⏳ Waiting for GraphQL feed request...")
-                
-                async def _scroll_loop():
-                    while not capture_event.is_set():
-                        try:
-                            # Small, smooth scrolls to reliably trigger IntersectionObservers
-                            await page.evaluate("window.scrollBy(0, 500)")
-                            await page.keyboard.press("PageDown")
-                            await asyncio.sleep(0.5)
-                        except Exception as e:
-                            logger.debug(f"Scroll loop interrupted: {e}")
-                            break
-                            
-                scroll_task = asyncio.create_task(_scroll_loop())
-
-            # Wait for capture with timeout
-            try:
-                await asyncio.wait_for(
-                    capture_event.wait(),
-                    timeout=INTERCEPT_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                if scroll_task and not scroll_task.done():
-                    scroll_task.cancel()
-                    
-                logger.error(
-                    f"❌ Timed out after {INTERCEPT_TIMEOUT}s waiting for "
-                    f"GraphQL feed request. The group page may not have loaded."
-                )
-                # Take a screenshot for debugging
-                try:
-                    screenshot_path = "/tmp/fb_template_debug.png"
-                    await page.screenshot(path=screenshot_path)
-                    logger.info(f"📸 Debug screenshot saved to {screenshot_path}")
-                except Exception:
-                    pass
-                await browser.close()
-                return None
+        scroll_task = None
+        # Wait for the feed GraphQL request
+        if not capture_event.is_set():
+            logger.info("â³ Waiting for GraphQL feed request...")
             
-            # Success path cleanup
+            async def _scroll_loop():
+                while not capture_event.is_set():
+                    try:
+                        # Small, smooth scrolls to reliably trigger IntersectionObservers
+                        await page.evaluate("window.scrollBy(0, 500)")
+                        await page.keyboard.press("PageDown")
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        logger.debug(f"Scroll loop interrupted: {e}")
+                        break
+                        
+            scroll_task = asyncio.create_task(_scroll_loop())
+
+        # Wait for capture with timeout
+        try:
+            await asyncio.wait_for(
+                capture_event.wait(),
+                timeout=INTERCEPT_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
             if scroll_task and not scroll_task.done():
                 scroll_task.cancel()
-
-            # Give a moment for feed
-            await asyncio.sleep(1)
-
-            # Try to trigger a comment fetch to capture comment template
-            if "comment" not in captured_template:
-                logger.info("⏳ Attempting to trigger comment template fetch by clicking 'Xem thêm bình luận' or similar...")
-                try:
-                    import re
-                    # Wait for at least one "bình luận" or "comment" text to appear on screen
-                    loc = page.locator("text-matches('(?i).*(bình luận|comment).*')").first
-                    try:
-                        await loc.wait_for(timeout=5000)
-                    except:
-                        pass
-                    
-                    locators = [
-                        "span:text-matches('(?i).*bình luận.*')",
-                        "span:text-matches('(?i).*comment.*')",
-                        "div[role='button']:text-matches('(?i).*bình luận.*')",
-                        "div[role='button']:text-matches('(?i).*comment.*')",
-                    ]
-                    for loc_str in locators:
-                        btn = page.locator(loc_str).first
-                        if await btn.count() > 0:
-                            await btn.click()
-                            logger.info(f"👉 Clicked: {loc_str}")
-                            await asyncio.sleep(3)
-                            break
-                except Exception as e:
-                    logger.warning(f"Could not click to fetch comments: {e}")
-
-            # We do NOT extract cookies here anymore.
-            # Cookies are sensitive and must be managed by the user via LocalStorage.
-            # Storing them in tokens.json on the server is a security risk.
-
-            # Save the template to file for fallback use
-            token_file = __import__("pathlib").Path(__file__).parent / "tokens.json"
+                
             try:
-                token_file.write_text(
-                    json.dumps(captured_template, indent=2, ensure_ascii=False),
-                    encoding="utf-8",
-                )
-                logger.info(f"💾 Fresh template saved to {token_file}")
+                await page.screenshot(path="/app/fb_debug_timeout.png")
+                logger.info("[DEBUG] Timeout screenshot saved to /app/fb_debug_timeout.png")
             except Exception as e:
-                logger.warning(f"Could not save template to file: {e}")
-
+                logger.error(f"Failed to save timeout screenshot: {e}")
+                
+            logger.error(
+                f"❌ Timed out after {INTERCEPT_TIMEOUT}s waiting for "
+                f"GraphQL feed request. The group page may not have loaded."
+            )
             await browser.close()
-            logger.info("🎭 Playwright browser closed")
+            return None
+            return None
+        
+        # Success path cleanup
+        if scroll_task and not scroll_task.done():
+            scroll_task.cancel()
 
-            return captured_template
+        # Give a moment for feed
+        await asyncio.sleep(1)
+
+        # Try to trigger a comment fetch to capture comment template
+        if "comment" not in captured_template:
+            logger.info("â³ Attempting to trigger comment template fetch by clicking 'Xem thÃªm bÃ¬nh luáº­n' or similar...")
+            try:
+                import re
+                # Wait for at least one "bÃ¬nh luáº­n" or "comment" text to appear on screen
+                loc = page.locator("text-matches('(?i).*(bÃ¬nh luáº­n|comment).*')").first
+                try:
+                    await loc.wait_for(timeout=5000)
+                except:
+                    pass
+                
+                locators = [
+                    "span:text-matches('(?i).*bÃ¬nh luáº­n.*')",
+                    "span:text-matches('(?i).*comment.*')",
+                    "div[role='button']:text-matches('(?i).*bÃ¬nh luáº­n.*')",
+                    "div[role='button']:text-matches('(?i).*comment.*')",
+                ]
+                for loc_str in locators:
+                    btn = page.locator(loc_str).first
+                    if await btn.count() > 0:
+                        await btn.click()
+                        logger.info(f"ðŸ‘‰ Clicked: {loc_str}")
+                        await asyncio.sleep(3)
+                        break
+            except Exception as e:
+                logger.warning(f"Could not click to fetch comments: {e}")
+
+        # We do NOT extract cookies here anymore.
+        # Cookies are sensitive and must be managed by the user via LocalStorage.
+        # Storing them in tokens.json on the server is a security risk.
+
+        # Output the template to stdout so the parent process can capture it safely
+        import sys
+        print(f"---TEMPLATE_JSON_START---\n{json.dumps(captured_template, ensure_ascii=False)}\n---TEMPLATE_JSON_END---", file=sys.stdout)
+        sys.stdout.flush()
+        logger.info("📡 Template sent to parent process via stdout")
+
+        await browser.close()
+        logger.info("ðŸŽ­ Playwright browser closed")
+
+        return captured_template
 
     except Exception as e:
-        logger.error(f"❌ Playwright error: {e}")
+        logger.error(f"âŒ Playwright error: {e}")
         return None
+

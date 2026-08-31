@@ -10,6 +10,7 @@
   ],
   "host_permissions": [
     "*://*.facebook.com/",
+    "http://127.0.0.1:8888/*",
     "http://localhost:8888/*"
   ],
   "action": {

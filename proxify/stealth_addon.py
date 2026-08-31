@@ -56,8 +56,12 @@ class StealthUpstreamAddon:
             domain = flow.request.pretty_host
             if not any(d in domain for d in self.target_domains):
                 return
-
+                
+        # Don't spoof static assets or video streams
         url = flow.request.pretty_url
+        url_lower = url.lower()
+        if any(ext in url_lower for ext in [".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".mp4", ".webm", ".woff", ".ttf", "rsrc.php"]):
+            return
         method = flow.request.method
         headers = dict(flow.request.headers)
         data = flow.request.raw_content

@@ -1,22 +1,23 @@
-# Sửa lỗi Cookie Facebook
+# Báo cáo Cập nhật: Sửa lỗi "Cookies đã hết hạn" (Error 1357001)
 
 ## Tóm tắt thay đổi
-1. Sửa câu lệnh SQL trích xuất Cookie trong `proxify/platforms/facebook/template_fetcher.py` và `proxify/platforms/facebook/token_store.py` thành:
-   `AND request_headers ILIKE '%c_user=%' AND request_headers ILIKE '%xs=%'`
-2. Đổi hàm `get_cookies_and_ua_from_db` trong `token_store.py` để trả về thẳng chuỗi cookie thô (raw cookie string) thay vì parse thành dict.
-3. Tái cấu trúc hàm `_resolve_cookie` trong `proxify/platforms/facebook/crawler.py`:
-   - Biến thành hàm bất đồng bộ (`async`).
-   - Đổi thứ tự ưu tiên lấy cookie thành: `client_cookie` > `Cookie từ Database` > `Cookie từ template (cũ)`.
-4. Xóa bỏ logic fallback vụn vặt và thừa thãi nằm rải rác trong `_execute_crawl_group_feed`, `_execute_crawl_comments` và `_scrape_comments_from_page`.
+Đã thực hiện 3 sửa đổi chính nhằm khắc phục lỗi crawler không nhận cookie mới và bị chặn bởi cơ chế chống bot của Facebook:
+1. Đảo ngược độ ưu tiên nạp Cookie trong `crawler.py`.
+2. Thay thế `aiohttp` bằng thư viện `StealthSessionManager` (ẩn danh JA3/TLS) trong `auth_fetcher.py`.
+3. Viết lại logic bóc tách token `fb_dtsg` và `lsd` để hỗ trợ trích xuất trực tiếp từ trang chủ `www.facebook.com` (React SPA) thay vì trang `mbasic`.
 
 ## Mục đích & Ý nghĩa
-- **Lỗi cũ:** Crawler lấy nhầm cookie ẩn danh (không có auth) hoặc ưu tiên lấy cookie trong template đã hết hạn, bỏ qua hoàn toàn cookie tươi vừa mới login được lưu trong Database, dẫn tới việc bị Facebook báo lỗi `1357001` dù mới login xong.
-- **Sửa lỗi:** Thay đổi này ép hệ thống phải lấy đúng cookie chứa `xs` (session secret) và ưu tiên lấy cookie trực tiếp từ Database (do Mitmproxy bắt được khi người dùng duyệt web) trước khi dùng đồ cũ trong template, đảm bảo crawler luôn chạy trên session tươi nhất. Tập trung logic (DRY) ở `_resolve_cookie` giúp code dễ bảo trì hơn.
+- **Giải quyết vấn đề vòng lặp báo lỗi:** Trước đây, mặc dù người dùng đã dán cookie mới, Proxify vẫn dùng lại cookie cũ lưu trong RAM từ Template GraphQL. Việc cập nhật ưu tiên cho phép người dùng ghi đè (override) ngay lập tức bằng cookie tươi mà không cần khởi động lại.
+- **Tránh Anti-Bot:** Facebook đã bắt đầu chặn hoặc chuyển hướng các request gọi vào `mbasic.facebook.com` bằng HTTP Client thông thường (aiohttp) vì dễ nhận diện. Chuyển sang `StealthSessionManager` giúp giả lập handshake TLS giống hệt trình duyệt thật, tránh bị block/checkpoint oan.
+- **Lấy Token chính xác:** Việc trích xuất dữ liệu từ `DTSGInitialData` trên trang web mới đảm bảo crawler luôn có token bảo mật hợp lệ để gửi kèm theo yêu cầu GraphQL.
 
 ## Mối liên hệ
-- Các file bị ảnh hưởng: `template_fetcher.py`, `token_store.py`, `crawler.py`.
-- Tác động tích cực lên toàn bộ tiến trình quét dữ liệu Facebook Group, đảm bảo tỉ lệ sống sót của các tác vụ ngầm (background jobs) và sửa triệt để lỗi không quét được ngay sau khi login.
+Những thay đổi này tác động trực tiếp đến module Facebook Crawler:
+- **`proxify/platforms/facebook/crawler.py`**: Phương thức `_resolve_cookie` được viết lại.
+- **`proxify/platforms/facebook/auth_fetcher.py`**: Logic `fetch_fb_auth_tokens` được viết lại hoàn toàn.
+- **`proxify/platforms/facebook/api.py`**: API lưu trữ cookie không thay đổi logic nhưng giờ đây được hưởng lợi nhờ việc crawler tự động ưu tiên cookie do người dùng cung cấp.
 
 ## Rủi ro (Risks & Edge Cases)
-- **Truy vấn chậm:** Việc ưu tiên gọi DB mỗi lần `_resolve_cookie` chạy (cho từng request con hoặc mỗi trang) có thể tạo ra một chút tải thêm lên Database, tuy nhiên vì bảng `requests` đã có index và truy vấn dùng `LIMIT 1` nên độ trễ là không đáng kể so với I/O mạng của Playwright/Curl.
-- **Race Condition nhẹ:** Trong trường hợp token vừa hết hạn trong khi request đang gửi, hệ thống có thể cần người dùng thao tác lại để lấy cookie mới vào DB.
+1. **Lỗi Parsing Regex (Cao):** Do React SPA của Facebook thường xuyên thay đổi cấu trúc mã nguồn, Regex để tìm `"DTSGInitialData"` có thể bị hỏng trong tương lai. Nếu điều này xảy ra, crawler sẽ không bóc tách được `fb_dtsg` và cần phải điều chỉnh Regex.
+2. **Khác biệt Headers / User-Agent (Vừa):** Hiện tại code đã cố gắng bám sát `user-agent` mà người dùng truyền vào (hoặc mặc định của extension). Nếu người dùng dùng cookie từ trình duyệt Safari/Mac nhưng `StealthSessionManager` mô phỏng Windows/Chrome, Facebook có thể đánh dấu phiên đăng nhập là bất thường và văng Checkpoint.
+3. **Cookie định dạng sai:** Đã thêm check chứa `c_user=` và `xs=`. Tuy nhiên, nếu cookie bị thiếu các phần tử liên quan đến Datar (datr, fr, v.v.), có thể request lấy token ban đầu vẫn bị chặn. 

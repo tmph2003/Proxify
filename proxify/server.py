@@ -104,7 +104,7 @@ async def run_server():
     # Enable stealth mode for Facebook domains
     try:
         from proxify.stealth_addon import StealthUpstreamAddon
-        stealth = StealthUpstreamAddon(target_domains=["facebook.com", "fbcdn.net"])
+        stealth = StealthUpstreamAddon(target_domains=["facebook.com"])
         master.addons.add(stealth)
         logger.info("🛡️  Stealth Mode ENABLED in v2")
     except ImportError:

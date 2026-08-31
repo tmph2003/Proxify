@@ -249,7 +249,7 @@ async def process_job(page, job, zalo_db):
 
 
 async def main():
-    from playwright.async_api import async_playwright
+    from cloakbrowser import launch_persistent_context_async
 
     try:
         from proxify.platforms.zalo import zalo_db
@@ -259,63 +259,61 @@ async def main():
         return
 
     logger.info("=" * 60)
-    logger.info("  🤖 Zalo Bot — Scan Worker")
+    logger.info("  🤖 Zalo Bot — Scan Worker (CloakBrowser Stealth)")
     logger.info(f"  📡 Proxy: {PROXY_SERVER}")
     logger.info(f"  ⏱️  Poll interval: {POLL_INTERVAL}s")
     logger.info(f"  ⏳ Extract wait: {EXTRACT_WAIT}s per group")
     logger.info("=" * 60)
 
-    async with async_playwright() as p:
-        logger.info("🌐 Đang khởi động trình duyệt...")
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=USER_DATA_DIR,
-            viewport={"width": 1280, "height": 800},
-            headless=False,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--ignore-certificate-errors",
-                "--disable-cache",
-                "--disable-application-cache",
-                "--disk-cache-size=1"
-            ],
-            ignore_default_args=["--enable-automation"],
-            proxy={"server": PROXY_SERVER},
-            ignore_https_errors=True,
-        )
+    logger.info("🌐 Đang khởi động trình duyệt CloakBrowser...")
+    context = await launch_persistent_context_async(
+        user_data_dir=USER_DATA_DIR,
+        viewport={"width": 1280, "height": 800},
+        headless=True,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            "--ignore-certificate-errors",
+            "--disable-cache",
+            "--disable-application-cache",
+            "--disk-cache-size=1"
+        ],
+        proxy={"server": PROXY_SERVER},
+        ignore_https_errors=True,
+    )
 
-        page = await context.new_page()
-        
-        # Capture console logs to see why JS fetch fails
-        page.on("console", lambda msg: logger.info(f"💻 [Browser Console] {msg.type}: {msg.text}"))
+    page = await context.new_page()
+    
+    # Capture console logs to see why JS fetch fails
+    page.on("console", lambda msg: logger.info(f"💻 [Browser Console] {msg.type}: {msg.text}"))
 
-        await ensure_logged_in(page)
+    await ensure_logged_in(page)
 
-        logger.info("🔄 Bắt đầu polling scan jobs từ database...")
-        logger.info("   Mở http://localhost:8888/zalo để gửi link nhóm cần quét.")
+    logger.info("🔄 Bắt đầu polling scan jobs từ database...")
+    logger.info("   Mở http://localhost:8888/zalo để gửi link nhóm cần quét.")
 
-        try:
-            while True:
-                try:
-                    pending = zalo_db.jobs.get_pending()
-                    if pending:
-                        logger.info(f"📋 Tìm thấy {len(pending)} job(s) chờ xử lý.")
-                        for job in pending:
-                            await process_job(page, job, zalo_db)
-                            await page.wait_for_timeout(2000)
-                    await asyncio.sleep(POLL_INTERVAL)
-                except Exception as loop_e:
-                    logger.error(f"Lỗi trong vòng lặp chính (có thể trình duyệt bị đóng): {loop_e}")
-                    if "TargetClosed" in str(loop_e) or "has been closed" in str(loop_e):
-                        logger.error("Trình duyệt đã bị đóng. Dừng bot...")
-                        break
-                    await asyncio.sleep(POLL_INTERVAL)
+    try:
+        while True:
+            try:
+                pending = zalo_db.jobs.get_pending()
+                if pending:
+                    logger.info(f"📋 Tìm thấy {len(pending)} job(s) chờ xử lý.")
+                    for job in pending:
+                        await process_job(page, job, zalo_db)
+                        await page.wait_for_timeout(2000)
+                await asyncio.sleep(POLL_INTERVAL)
+            except Exception as loop_e:
+                logger.error(f"Lỗi trong vòng lặp chính (có thể trình duyệt bị đóng): {loop_e}")
+                if "TargetClosed" in str(loop_e) or "has been closed" in str(loop_e):
+                    logger.error("Trình duyệt đã bị đóng. Dừng bot...")
+                    break
+                await asyncio.sleep(POLL_INTERVAL)
 
-        except asyncio.CancelledError:
-            logger.info("Bot bị hủy.")
-        finally:
-            logger.info("🛑 Đang đóng trình duyệt...")
-            await context.close()
+    except asyncio.CancelledError:
+        logger.info("Bot bị hủy.")
+    finally:
+        logger.info("🛑 Đang đóng trình duyệt...")
+        await context.close()
 
 
 if __name__ == "__main__":

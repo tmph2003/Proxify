@@ -90,9 +90,35 @@ python -m proxify
 - **Real-time Dashboard**: Monitor traffic, configure proxy settings, and view logs directly from your browser—no need to stare at the terminal console.
 - **Highly Extensible**: Mitmproxy's Addon architecture allows you to easily write custom parsing logic for specific domains (Platforms).
 
-## 📂 Directory Structure (Architecture)
+## 📂 System Architecture & Workflow
 
-The codebase follows strict **SOLID** principles, utilizing **Dependency Injection**, **Event-Driven Architecture (Pub/Sub)**, and the **Repository Pattern** to ensure high maintainability and performance.
+The Proxify system is designed to bypass strict anti-bot mechanisms (e.g., Cloudflare, Facebook Checkpoint) through the combination of 3 core components:
+1. **Chrome Extension:** Extracts security tokens from the user's real browser.
+2. **CloakBrowser:** A virtualized, headless browser running on the server to capture GraphQL Templates.
+3. **StealthSessionManager (`curl_cffi`):** A TLS Fingerprint spoofing engine for high-speed, stealthy API requests.
+
+### 🔄 Detailed Workflow (Facebook Crawler)
+
+**Phase 1: Preparation (Fetching Cookie & Template)**
+1. **Token Extraction (Cookie & fb_dtsg):** The user installs the Proxify Chrome Extension. Upon clicking "Get Cookie", the extension reads all cookies from `facebook.com` and injects a script to extract the `fb_dtsg` token. This data is silently sent to the Proxify Backend (`/api/facebook/cookie`) and stored temporarily in RAM (`IN_MEMORY_COOKIES`).
+2. **Triggering the Crawl:** The user accesses the Web UI, enters a Facebook Group link, and clicks "Start Crawling" (`/api/facebook/crawl`).
+3. **Template Fetching:** The backend launches a hidden **CloakBrowser** instance. This browser utilizes the user's cookies to navigate to the Facebook Group, triggering legitimate GraphQL requests. The Mitmproxy core intercepts these requests, extracts the "Template" (Headers and hidden payload fields like `__spin_r`, `jazoest`), and saves it to `IN_MEMORY_TEMPLATES`. The headless browser is then immediately closed to free up memory.
+
+**Phase 2: High-Speed Crawling (Anti-Bot Bypass)**
+1. **Initialization:** The `start_crawler()` function merges the user's authentic cookie with the newly acquired Template.
+2. **Firing Requests (StealthSessionManager):** The crawler **no longer uses a browser**. Instead, it uses `curl_cffi` (a C++ core library) to send HTTP POST requests directly to `/api/graphql/`. Unlike standard libraries (like `requests`), which are easily detected by WAFs via their JA3 Fingerprints, `curl_cffi` perfectly spoofs the **TLS/JA3 fingerprint and HTTP/2 characteristics** of a real Google Chrome browser, completely bypassing Facebook's detection systems.
+3. **OS Fingerprint Synchronization:** The system automatically analyzes the provided User-Agent to align the `Sec-Ch-Ua-Platform` headers perfectly (e.g., matching Windows User-Agent with Windows headers, overriding curl_cffi's macOS defaults). This eliminates Facebook Checkpoint Error 1357001 entirely.
+
+**Phase 3: Parsing & Pagination**
+1. **Extraction:** The massive JSON response is passed to `extractor.py` to extract `post_id`, message text, author details, reaction counts, etc.
+2. **Database Storage:** The parsed data is inserted into PostgreSQL via the thread-safe `ThreadedConnectionPool`.
+3. **Pagination & Retry:** The crawler extracts the `end_cursor` from the JSON and injects it back into the Template for the next loop. In case of network drops or rate limits, the Exponential Backoff algorithm inside `StealthSessionManager` calculates a safe delay and automatically retries the request.
+
+---
+
+## 📂 Directory Structure
+
+The codebase follows strict **SOLID** principles, utilizing **Dependency Injection**, **Event-Driven Architecture (Pub/Sub)**, and the **Repository Pattern**.
 
 ```text
 proxify/

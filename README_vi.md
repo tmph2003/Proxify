@@ -90,9 +90,35 @@ python -m proxify
 - **Dashboard thời gian thực**: Theo dõi luồng dữ liệu, điều chỉnh cấu hình và xem log ngay trên trình duyệt, không cần nhìn chằm chằm vào console.
 - **Khả năng mở rộng**: Tận dụng kiến trúc Addon của Mitmproxy, bạn có thể dễ dàng viết thêm các đoạn script parse logic riêng cho các domain cụ thể (Platforms).
 
-## 📂 Cấu Trúc Thư Mục (Kiến trúc)
+## 📂 Kiến trúc Hệ thống & Luồng hoạt động (Workflow)
 
-Codebase tuân thủ nghiêm ngặt các nguyên tắc **SOLID**, ứng dụng **Dependency Injection**, **Event-Driven Architecture (Pub/Sub)**, và **Repository Pattern** để đảm bảo khả năng mở rộng, hiệu suất cao và dễ dàng bảo trì.
+Hệ thống Proxify được thiết kế để vượt qua các cơ chế Anti-Bot khắt khe nhất (như Cloudflare, Facebook Checkpoint) thông qua sự kết hợp của 3 thành phần lõi:
+1. **Chrome Extension:** Lấy Token bảo mật từ trình duyệt thật của người dùng.
+2. **CloakBrowser:** Trình duyệt ảo hóa chạy ngầm trên Server để bắt GraphQL Template.
+3. **StealthSessionManager (`curl_cffi`):** Động cơ giả lập TLS Fingerprint để bắn API ngầm tốc độ cao.
+
+### 🔄 Luồng hoạt động chi tiết (Facebook Crawler)
+
+**Giai đoạn 1: Chuẩn bị Vũ khí (Lấy Cookie & Template)**
+1. **Lấy Token (Cookie & fb_dtsg):** Người dùng cài đặt Chrome Extension của Proxify. Khi bấm nút "Get Cookie", Extension sẽ đọc toàn bộ Cookie của trang `facebook.com` và Inject Script để trích xuất mã `fb_dtsg`. Dữ liệu này được gửi ngầm về Proxify Backend (`/api/facebook/cookie`) và lưu tạm vào RAM (`IN_MEMORY_COOKIES`).
+2. **Kích hoạt thu thập:** Người dùng vào giao diện Web, nhập link Group và bấm "Bắt đầu thu thập" (`/api/facebook/crawl`).
+3. **Lấy Template (Khuôn đúc):** Backend mở một trình duyệt ảo **CloakBrowser** chạy ngầm (Headless). Trình duyệt này mang Cookie của người dùng lướt thẳng vào Group Facebook, kích hoạt các Request GraphQL. Lúc này, lõi Proxy (Mitmproxy) sẽ đứng giữa "chộp" (intercept) lại các Request này, bóc tách ra cái "Khuôn chuẩn" (chứa Headers và Payload ẩn như `__spin_r`, `jazoest`...) và lưu vào biến `IN_MEMORY_TEMPLATES`. Sau đó, trình duyệt ngầm lập tức đóng lại để giải phóng bộ nhớ.
+
+**Giai đoạn 2: Cào dữ liệu tốc độ cao (Bypass Anti-Bot)**
+1. **Lên đạn:** Hàm `start_crawler()` kết hợp Cookie thật và Khuôn đúc (Template) vừa lấy được.
+2. **Bắn Request (StealthSessionManager):** Lúc này Crawler **không dùng trình duyệt nữa**. Nó sử dụng thư viện `curl_cffi` (lõi C++) để gửi trực tiếp các HTTP POST request thẳng lên `/api/graphql/`. Khác với các thư viện thông thường như `requests` (rất dễ bị WAF phát hiện qua JA3 Fingerprint), `curl_cffi` có khả năng giả mạo chính xác **bộ vân tay mã hóa (TLS/JA3 Fingerprint) và cấu trúc HTTP/2** của một trình duyệt Chrome thực thụ, khiến hệ thống của Facebook bị lừa hoàn toàn.
+3. **Đồng bộ OS Fingerprint:** Hệ thống tự động phân tích User-Agent để cân chỉnh các header `Sec-Ch-Ua-Platform` khớp hoàn hảo (VD: User-Agent là Windows thì Header phải là Windows, tránh tình trạng curl_cffi mặc định là macOS), triệt tiêu hoàn toàn lỗi Checkpoint 1357001 của Facebook.
+
+**Giai đoạn 3: Phân tích & Lật trang**
+1. **Bóc tách:** Khối JSON khổng lồ trả về được đưa vào `extractor.py` để trích xuất `post_id`, nội dung bài viết, tác giả, số Like, v.v.
+2. **Lưu Database:** Dữ liệu đẩy vào PostgreSQL thông qua `ThreadedConnectionPool` đảm bảo an toàn đa luồng.
+3. **Lật trang & Retry:** Crawler tự động bóc tách mã `end_cursor` từ JSON, chèn lại vào "Khuôn" cho vòng lặp tiếp theo. Nếu gặp sự cố rớt mạng hoặc Rate Limit, thuật toán Exponential Backoff trong `StealthSessionManager` sẽ tự động tính toán thời gian trễ và gửi lại request một cách an toàn.
+
+---
+
+## 📂 Cấu Trúc Thư Mục
+
+Codebase tuân thủ nghiêm ngặt các nguyên tắc **SOLID**, ứng dụng **Dependency Injection**, **Event-Driven Architecture (Pub/Sub)**, và **Repository Pattern**.
 
 ```text
 proxify/

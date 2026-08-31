@@ -39,7 +39,17 @@ class FacebookAPI:
             web.post("/api/facebook/bulk_action", self._handle_bulk_action),
             web.patch("/api/facebook/post_status", self._handle_post_status),
             web.get("/api/facebook/bulk_status", self._handle_bulk_status),
+            web.post("/api/facebook/stop_crawl", self._handle_stop_crawl),
         ]
+
+    async def _handle_stop_crawl(self, request: web.Request) -> web.Response:
+        try:
+            from proxify.platforms.facebook.crawler import _default_crawler
+            _default_crawler.stop_crawling()
+            return web.json_response({"status": "ok", "message": "Đã gửi lệnh dừng thu thập dữ liệu."})
+        except Exception as e:
+            logger.error(f"Error stopping crawl: {e}")
+            return web.json_response({"status": "error", "message": str(e)}, status=500)
 
     async def _handle_get_groups(self, request: web.Request) -> web.Response:
         import time
@@ -113,6 +123,15 @@ class FacebookAPI:
                 
         except Exception as e:
             return web.json_response({"status": "error", "message": f"Invalid date format: {e}"}, status=400)
+            
+        from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+        
+        # Extract User-Agent from the incoming request (crucial for Facebook fingerprinting)
+        client_ua = request.headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36")
+        
+        # Fallback to in-memory cookie if UI didn't send one
+        if not cookie:
+            cookie = IN_MEMORY_COOKIES.get("cookie", "")
 
         async def _crawl_with_fresh_template():
             """Fetch fresh template via Playwright in a subprocess, then start crawler."""
@@ -132,85 +151,59 @@ class FacebookAPI:
                     "Playwright đang mở trang group để bắt request GraphQL."
                 )
 
-                cookie_str = cookie or ""
+                cookie_str = cookie or IN_MEMORY_COOKIES.get("cookie", "")
                 
-                # Run template fetcher in a separate process using subprocess.run
-                # wrapped in asyncio.to_thread to avoid asyncio child watcher bugs
-                script = (
-                    f"import asyncio; "
-                    f"from proxify.platforms.facebook.template_fetcher import fetch_fresh_template; "
-                    f"asyncio.run(fetch_fresh_template('{group_id}'))"
-                )
+                # INJECT FRESH auth headers from Extension if available
+                # This fixes Facebook Error 1357001 caused by fb_dtsg mismatch when cookie is pasted/updated via UI
+                from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+                fb_dtsg = IN_MEMORY_COOKIES.get("fb_dtsg")
+                lsd = IN_MEMORY_COOKIES.get("lsd")
                 
-                try:
-                    def _run_fetcher():
-                        env = os.environ.copy()
-                        env["PROXIFY_FB_COOKIE"] = cookie_str
-                        return subprocess.run(
-                            [sys.executable, "-c", script],
-                            capture_output=True,
-                            text=True,
-                            timeout=120,
-                            env=env
-                        )
+                # If the user pasted a cookie manually, we MUST fetch a new fb_dtsg using that cookie!
+                # Or if we don't have fb_dtsg at all, try to fetch it.
+                if cookie_str and (not fb_dtsg or cookie):
+                    from proxify.platforms.facebook.auth_fetcher import fetch_fb_auth_tokens
+                    group_crawl_state["message"] = f"🔄 Đang kiểm tra Cookie và lấy fb_dtsg tự động..."
                     
-                    proc = await asyncio.to_thread(_run_fetcher)
-                    
-                    if proc.stdout:
-                        logger.info(f"Template fetcher stdout: {proc.stdout[-500:]}")
-                    if proc.returncode != 0:
-                        logger.error(f"Template fetcher failed (rc={proc.returncode}): {proc.stderr[-500:]}")
-                    else:
-                        logger.info("Template fetcher subprocess completed successfully")
-                        if proc.stderr:
-                            logger.info(f"Template fetcher stderr: {proc.stderr[-300:]}")
-                    
-                    # If Facebook redirected to login, the cookie is dead -> abort immediately
-                    fetcher_output = (proc.stderr or "") + (proc.stdout or "")
-                    if "redirected to login" in fetcher_output:
-                        logger.error("[Crawler] Template Fetcher detected login redirect -> cookie is expired/invalid")
+                    # Pass the client's browser User-Agent so Facebook doesn't reject the cookie due to UA mismatch
+                    ua_to_use = IN_MEMORY_COOKIES.get("user_agent") or client_ua
+                    new_fb_dtsg, new_lsd, err_msg = await fetch_fb_auth_tokens(cookie_str, ua_to_use)
+                    if err_msg:
                         group_crawl_state["status"] = "error"
-                        group_crawl_state["message"] = (
-                            "❌ Cookie Facebook đã hết hạn.\n"
-                            "Vui lòng paste cookie mới vào ô 'Facebook Cookie' trên giao diện."
-                        )
-                        return  # Don't start crawler with dead cookie
+                        group_crawl_state["message"] = err_msg
+                        return
+                    if new_fb_dtsg:
+                        fb_dtsg = new_fb_dtsg
+                        IN_MEMORY_COOKIES["fb_dtsg"] = fb_dtsg
+                    if new_lsd:
+                        lsd = new_lsd
+                        IN_MEMORY_COOKIES["lsd"] = lsd
+                        
+                    group_crawl_state["message"] = f"🔄 Đang khởi chạy crawler cho Group {group_id}..."
 
+                if fb_dtsg and lsd:
+                    for key in ["feed", "comment", "reply"]:
+                        if key in IN_MEMORY_TEMPLATES and isinstance(IN_MEMORY_TEMPLATES[key], dict) and "form_data" in IN_MEMORY_TEMPLATES[key]:
+                            IN_MEMORY_TEMPLATES[key]["form_data"]["fb_dtsg"] = fb_dtsg
+                            IN_MEMORY_TEMPLATES[key]["form_data"]["lsd"] = lsd
+                            
+                try:
+                    await start_crawler(group_id, start_ts, end_ts, client_cookie=cookie_str)
                 except Exception as e:
-                    logger.error(f"Error running template fetcher subprocess: {e}")
-
-                # Read the saved tokens.json
-                template = None
-                token_file = Path(__file__).parent / "tokens.json"
-                if token_file.exists():
-                    try:
-                        template = json.loads(token_file.read_text(encoding="utf-8"))
-                        if cookie_str:
-                            template["cookie"] = cookie_str
-                    except Exception as e:
-                        logger.error(f"Error reading fresh template: {e}")
-
-                if not template:
-                    logger.warning(
-                        "Playwright could not fetch fresh template. "
-                        "Falling back to saved template."
-                    )
-                    group_crawl_state["message"] = (
-                        "⚠️ Không lấy được template mới. Đang dùng template cũ..."
-                    )
-
-                await start_crawler(group_id, start_ts, end_ts, template=template, client_cookie=cookie_str)
-            except Exception as e:
-                import traceback
-                logger.error(f"FATAL error in _crawl_with_fresh_template: {e}")
-                logger.error(traceback.format_exc())
-                from proxify.platforms.facebook.crawler import group_crawl_state
-                group_crawl_state["status"] = "error"
-                group_crawl_state["message"] = f"Lỗi nội bộ: {e}"
+                    import traceback
+                    logger.error(f"FATAL error in start_crawler: {e}")
+                    logger.error(traceback.format_exc())
+                    group_crawl_state["status"] = "error"
+                    group_crawl_state["message"] = f"Lỗi nội bộ: {e}"
+                        
+                except Exception as e:
+                    logger.error(f"Error running lightweight template fetcher: {e}")
+                    group_crawl_state["status"] = "error"
+                    group_crawl_state["message"] = f"Lỗi nội bộ khi khởi tạo: {e}"
             finally:
-                logger.info("Cleared in-memory cookie after crawl.")
-
-        # Run in background
+                pass
+                
+        # Run Playwright template fetcher in background
         task = asyncio.create_task(_crawl_with_fresh_template())
         
         # Keep a strong reference to avoid garbage collection
@@ -734,11 +727,41 @@ class FacebookAPI:
             
             logger.info(f"[Extension] Received cookie len={len(cookie_str)}, UA={bool(user_agent)}, fb_dtsg={bool(fb_dtsg)} ({fb_dtsg[:10]}), lsd={bool(lsd)} ({lsd[:10]})")
             
-            if not cookie_str:
-                return web.json_response({"status": "error", "message": "Cookie is empty"}, status=400)
+            from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+            
+            feed_template = data.get("feed_template")
+            friendly_name = data.get("friendly_name")
+            
+            if feed_template and friendly_name:
+                logger.info(f"[Extension] Received GraphQL template for {friendly_name}")
+                from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+                if "GroupsCometFeed" in friendly_name or "CometGroup" in friendly_name:
+                    IN_MEMORY_TEMPLATES["feed"] = feed_template
+                    logger.info(f"[Extension] Saved Feed template: {friendly_name}")
+                elif "Comment" in friendly_name and "Pagination" not in friendly_name:
+                    IN_MEMORY_TEMPLATES["comment"] = feed_template
+                    logger.info(f"[Extension] Saved Comment template: {friendly_name}")
+                elif "Pagination" in friendly_name or "Reply" in friendly_name:
+                    IN_MEMORY_TEMPLATES["reply"] = feed_template
+                    logger.info(f"[Extension] Saved Reply template: {friendly_name}")
+                else:
+                    # Fallback save as feed if we can't determine
+                    IN_MEMORY_TEMPLATES["feed"] = feed_template
+                    logger.info(f"[Extension] Fallback saved as Feed template: {friendly_name}")
+
+            cookie_str = data.get("cookie", "").strip()
+            user_agent = data.get("user_agent", "").strip()
+            fb_dtsg = data.get("fb_dtsg", "").strip()
+            lsd = data.get("lsd", "").strip()
+            
+            logger.info(f"[Extension] Received cookie len={len(cookie_str)}, UA={bool(user_agent)}, fb_dtsg={bool(fb_dtsg)} ({fb_dtsg[:10]}), lsd={bool(lsd)} ({lsd[:10]})")
+            
+            if not cookie_str and not feed_template:
+                return web.json_response({"status": "error", "message": "No cookie or template provided"}, status=400)
 
             # Store in RAM only
-            IN_MEMORY_COOKIES["cookie"] = cookie_str
+            if cookie_str:
+                IN_MEMORY_COOKIES["cookie"] = cookie_str
             if user_agent:
                 IN_MEMORY_COOKIES["user_agent"] = user_agent
             if fb_dtsg:
@@ -751,7 +774,7 @@ class FacebookAPI:
             has_xs = "xs=" in cookie_str
             if has_c_user and has_xs:
                 msg = f"✅ Cookie đã lưu ({len(cookie_str)} ký tự). Phát hiện c_user và xs — sẵn sàng crawl!"
-            else:
+            elif cookie_str:
                 msg = (
                     f"⚠️ Cookie đã lưu ({len(cookie_str)} ký tự) nhưng "
                     f"thiếu {'c_user' if not has_c_user else ''}"
@@ -759,6 +782,9 @@ class FacebookAPI:
                     f"{'xs' if not has_xs else ''}. "
                     "Cookie có thể không đủ để xác thực."
                 )
+            else:
+                msg = f"✅ Đã lưu template {friendly_name} từ extension."
+                
             return web.json_response({"status": "ok", "message": msg})
         except Exception as e:
             logger.error(f"Error saving cookie: {e}")
