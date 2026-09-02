@@ -2,15 +2,13 @@ version: '3.8'
 
 services:
   proxify:
-    build: .
+    build: ./backend
     container_name: proxify_app
     ports:
-      # Ánh xạ port proxy (8080) và dashboard (8888) ra máy host (local)
+      # Ánh xạ port proxy (8080) ra máy host
       - "8080:8080"
-      - "8888:8888"
       - "51920:51820/udp"
     environment:
-      # Thiết lập PROXY_HOST=0.0.0.0 để container mở kết nối NAT ra bên ngoài
       - PROXY_HOST=0.0.0.0
       - PROXY_PORT=8080
       - DASHBOARD_PORT=8888
@@ -26,12 +24,19 @@ services:
         condition: service_healthy
     restart: unless-stopped
     volumes:
-      # Mount thư mục certs của mitmproxy ra thư mục User của host (ngoài project) để an toàn tuyệt đối
       - ~/.mitmproxy:/root/.mitmproxy
-      # Mount mã nguồn vào container để không cần build lại khi sửa code/HTML
-      - .:/app
-      # Mount CloakBrowser (Thư mục đã được copy vào Proxify) để code live
-      - ./CloakBrowser:/app/CloakBrowser
+      - ./backend:/app
+      - ./backend/CloakBrowser:/app/CloakBrowser
+
+  ui:
+    build: ./frontend
+    container_name: proxify_ui
+    ports:
+      # UI Dashboard sẽ nghe trên port 8888 của máy host (Nginx -> React SPA)
+      - "8888:80"
+    depends_on:
+      - proxify
+    restart: unless-stopped
 
   db:
     image: postgres:15-alpine
