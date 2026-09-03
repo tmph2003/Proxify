@@ -4,7 +4,7 @@
     <br>
     Proxify
     <br>
-    <small>The Ultimate Request Capture & Proxy Framework</small>
+    <small>The Ultimate Multi-Platform Request Capture & Reverse-Engineering Framework</small>
 </h1>
 
 <p align="center">
@@ -13,9 +13,11 @@
 
 <p align="center">
     <a href="https://python.org" alt="Python version">
-        <img alt="Python version" src="https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python"></a>
+        <img alt="Python version" src="https://img.shields.io/badge/Python-3.11%2B-blue?style=flat-square&logo=python"></a>
     <a href="https://mitmproxy.org/" alt="Mitmproxy">
         <img alt="Mitmproxy version" src="https://img.shields.io/badge/Mitmproxy-10.1%2B-red?style=flat-square"></a>
+    <a href="https://react.dev/" alt="React">
+        <img alt="React version" src="https://img.shields.io/badge/React-18%2B-61DAFB?style=flat-square&logo=react"></a>
     <a href="https://postgresql.org" alt="PostgreSQL">
         <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-Ready-336791?style=flat-square&logo=postgresql"></a>
     <a href="#" alt="License">
@@ -23,145 +25,171 @@
 </p>
 
 <p align="center">
-    <a href="#core-features"><strong>Tính năng chính</strong></a>
+    <a href="#overview"><strong>Tổng quan</strong></a>
+    &middot;
+    <a href="#core-features"><strong>Tính năng cốt lõi</strong></a>
+    &middot;
+    <a href="#platforms"><strong>Nền tảng & Plugin</strong></a>
     &middot;
     <a href="#quick-start"><strong>Bắt đầu nhanh</strong></a>
     &middot;
-    <a href="#platforms"><strong>Nền tảng hỗ trợ</strong></a>
+    <a href="#architecture"><strong>Kiến trúc hệ thống</strong></a>
     &middot;
-    <a href="#dashboard"><strong>Dashboard</strong></a>
-    &middot;
-    <a href="#cli"><strong>CLI</strong></a>
+    <a href="#structure"><strong>Cấu trúc thư mục</strong></a>
 </p>
-
-**Proxify** là một framework mạnh mẽ chuyên dùng để đánh chặn (intercept) và phân tích các luồng yêu cầu HTTP/HTTPS, được xây dựng dựa trên `mitmproxy`.
-
-Được thiết kế để chạy nền tĩnh lặng, tự động thu thập, phân tích và lưu trữ các request từ nhiều nền tảng (Zalo, Facebook, Shopee, v.v.) vào cơ sở dữ liệu PostgreSQL để phục vụ mục đích Data Extraction, Analytics hoặc Reverse Engineering. 
-
-Hệ thống hoạt động đa luồng, tối ưu bộ nhớ, tích hợp sẵn Dashboard thời gian thực và đảm bảo không bỏ sót bất kỳ request nào.
-
-```python
-# Tích hợp sâu nhiều Platform sẵn có
-from proxify.platforms.zalo import zalo_db
-
-# Tự động lưu vào PostgreSQL
-zalo_db.groups.upsert(
-    group_id="12345", 
-    name="Nhóm Bóc Tách", 
-    members=150
-)
-```
-
-Hoặc chạy chế độ CLI mạnh mẽ:
-
-```bash
-# Khởi động hệ thống proxy trên cổng 9090 và theo dõi facebook.com
-python -m proxify --port 9090 --dashboard-port 9999 --domain facebook.com
-```
 
 ---
 
-## 🚀 Bắt Đầu Nhanh
+## 🌟 Tổng Quan (Overview)
 
-Khởi động dự án cực kỳ dễ dàng.
+**Proxify** là một nền tảng framework toàn diện chuyên dùng để **đánh chặn (interception), phân tích giải mã (reverse-engineering), và tự động trích xuất dữ liệu (data extraction)** từ các luồng traffic HTTP/HTTPS/HTTP2/WebSocket.
+
+Được xây dựng trên nền tảng **Mitmproxy 10**, Proxify kết hợp giữa:
+1. **Lõi Proxy Đa Luồng (Mitmproxy Core)**: Đánh chặn tàng hình, giải mã TLS, tự động lưu trữ luồng dữ liệu thô vào PostgreSQL.
+2. **Cơ Chế Bỏ Qua Anti-Bot (Stealth & TLS Spoofing)**: Nhận diện và vượt qua các cơ chế WAF/Anti-Bot khắt khe (Cloudflare, Facebook Checkpoint, Akamai) thông qua giả lập TLS/JA3 Fingerprint và Chrome Extension First-Party Tab Bridge.
+3. **Hệ Thống Plugin & Nền Tảng Đa Dạng**: Tích hợp sẵn bộ trích xuất dữ liệu chuyên sâu cho **Facebook**, **Zalo**, **YouTube**, cùng kiến trúc plugin mở dễ dàng mở rộng cho TikTok, Shopee, Telegram,...
+4. **Dashboard Quản Trị Trực Quan**: Theo dõi traffic thời gian thực (Live Traffic Inspector tương tự Fiddler/Charles), quản lý phiên, cấu hình proxy và điều khiển cào dữ liệu qua giao diện Web React hiện đại.
+
+---
+
+## 🛡️ Tính Năng Cốt Lõi (Core Features)
+
+### 1. Đánh Chặn & Giải Mã Traffic Tàng Hình (Stealth MITM)
+- **Giải mã HTTPS/TLS**: Tự động cài đặt CA Certificate để bóc tách toàn bộ gói tin mã hóa SSL/TLS trên trình duyệt, ứng dụng di động (Android/iOS) và giả lập.
+- **Hỗ trợ HTTP/2 & WebSocket**: Bắt trọn vẹn các luồng dữ liệu thời gian thực (như Zalo Chat WebSocket, Facebook Lightspeed/StreamController).
+- **Lưu trữ Traffic Bất đồng bộ (Async Traffic Storage)**: Toàn bộ Request và Response thô được đẩy vào hàng đợi và xử lý bởi `TrafficStorageWorker` lưu vào PostgreSQL mà không gây bất kỳ độ trễ nào cho kết nối mạng của người dùng.
+- **Bộ Lọc Log Thông Minh (Clean Logging)**: Tích hợp `PollingEndpointFilter` loại bỏ 100% rác log polling nội bộ `200 OK`, chỉ hiển thị các sự kiện nghiệp vụ và cảnh báo thực sự quan trọng.
+
+### 2. Bộ Công Cụ Vượt Rào Cản Anti-Bot (Stealth Engine)
+- **Phát hiện Soft-Block tự động (`stealth.py`)**: Tự động nhận diện các trang thử thách Cloudflare Turnstile, CAPTCHA, Facebook Checkpoint redirect và mã lỗi 429/503 để kích hoạt Exponential Backoff.
+- **Chrome Extension First-Party Tab Bridge**: Thực thi request ngầm ngay trong tab trình duyệt thật của người dùng, kế thừa trọn vẹn phiên đăng nhập, Cookie và IP nội địa, **triệt tiêu hoàn toàn lỗi Checkpoint/Logout 1357001**.
+- **Circuit Breaker Pattern**: Bảo vệ hệ thống khỏi việc gửi dồn dập request khi máy chủ đích đang bị nghẽn hoặc tạm khóa.
+
+### 3. Kiến Trúc Plugin Cắm Nóng (Dynamic Plugin System)
+- Thiết kế theo nguyên tắc **Open/Closed**: Mọi nền tảng mới chỉ cần kế thừa `BasePlugin` và đăng ký qua `@register_plugin("name")`.
+- Tự động hook vào các vòng đời gói tin: `on_request()`, `on_response()`, `on_websocket_message()`, `on_error()`.
+
+---
+
+## 🌐 Các Nền Tảng Hỗ Trợ Sẵn (Supported Platforms & Plugins)
+
+### 📘 1. Facebook Platform (`platforms/facebook/`)
+- **Tách Rời Feed & Comment ($50\times$ Speedup)**: Cào danh sách bài viết nhóm theo thứ tự thời gian (`CHRONOLOGICAL`) siêu tốc (~1.5s/trang), tách biệt hoàn toàn với tiến trình cào bình luận.
+- **Tự Động Thu Thập "Tất Cả Bình Luận"**: Cưỡng chế `CHRONOLOGICAL_UNFILTERED_INTENT_V1` để lấy sạch 100% bình luận (kể cả bình luận bị Facebook xếp vào spam hoặc ẩn).
+- **Phân Trang 2 Chiều (Bi-Directional Relay Pagination)**: Hỗ trợ đồng thời cả `before` và `after` cursor, nâng giới hạn lên đến 500 trang (~5,000 bình luận/bài viết).
+- **Điều Khiển Bắt Đầu / Dừng Cào Tức Thì**: Nút bấm dừng cào linh hoạt kèm hủy bỏ tác vụ nền ngay lập tức.
+- **Giao Diện Facebook Dashboard**: Quản lý phiên, lọc theo tác giả, ngày tháng, tìm kiếm full-text và modal xem chi tiết bình luận đa cấp.
+
+### 💬 2. Zalo Platform (`platforms/zalo/` & `plugins/zalo.py`)
+- **Giải Mã Giao Thức Zalo**: Sử dụng engine JavaScript nhúng (`crypto_subtle.js`) để giải mã các gói tin mã hóa đầu cuối (E2EE) và dữ liệu WebSocket của Zalo Web.
+- **Bóc Tách Tin Nhắn & Hội Thoại**: Tự động trích xuất cấu trúc tin nhắn, hội thoại cá nhân, danh bạ bạn bè và thông tin thành viên nhóm Zalo (`database.py`, `models.py`, `repository.py`).
+- **Giao Diện Zalo Riêng Biệt**: Template giao diện độc lập (`zalo.html`, `zalo.js`) phục vụ việc theo dõi tin nhắn và danh bạ trực tiếp.
+
+### 🎥 3. YouTube Plugin (`plugins/youtube.py` & `utils/youtube_utils.py`)
+- **Lọc & Loại Bỏ Quảng Cáo (Ad-Stripping)**: Tự động phát hiện và loại bỏ các đoạn quảng cáo chèn trong luồng dữ liệu video/audio của YouTube (`strip_youtube_ads`).
+- **Bắt Luồng Video/Audio Stream**: Bóc tách các URL streaming media trực tiếp, hỗ trợ việc tải về hoặc phát nền không giới hạn.
+
+### 🔌 4. TLS Spoofer Plugin (`plugins/tls_spoofer.py`)
+- Giả lập vân tay TLS ClientHello và bộ mã hóa Cipher Suites chuẩn của Google Chrome trên Windows/macOS, che giấu dấu vết proxy đối với các hệ thống WAF giám sát JA3.
+
+---
+
+## 🚀 Bắt Đầu Nhanh (Quick Start)
+
+### Cách 1: Chạy Bằng Docker Compose (Khuyên Dùng)
+
+Khởi chạy trọn bộ 3 dịch vụ chỉ với một câu lệnh:
 
 ```bash
-# 1. Cài đặt các thư viện cần thiết
+# 1. Clone mã nguồn
+git clone https://github.com/tmph2003/Proxify.git
+cd Proxify
+
+# 2. Khởi chạy toàn bộ hệ thống
+docker compose up -d
+```
+
+Các dịch vụ sẽ sẵn sàng tại:
+- **Web Dashboard (React UI):** `http://localhost:8888`
+- **Proxy Server (Mitmproxy):** `http://localhost:8080`
+- **PostgreSQL Database:** Cổng `5432`
+
+> 💡 **Cài đặt chứng chỉ SSL/TLS (Chỉ làm 1 lần duy nhất):**  
+> Cấu hình máy của bạn trỏ Proxy về `127.0.0.1:8080`, sau đó truy cập `http://mitm.it` trên trình duyệt để tải và cài đặt chứng chỉ Root CA vào máy.
+
+---
+
+### Cách 2: Chạy Thủ Công (Development Mode)
+
+```bash
+# 1. Cài đặt thư viện Python
 pip install -r requirements.txt
 
 # 2. Cấu hình biến môi trường
 cp .env.example .env
-# Sửa file .env với thông tin DB_DSN, PROXY_PORT,... của riêng bạn
 
-# 3. Chạy hệ thống
+# 3. Khởi chạy Backend Proxy
 python -m proxify
+
+# 4. Khởi chạy Frontend UI (Thư mục frontend/)
+cd frontend
+npm install
+npm run dev
 ```
-> ⚠️ **Quan trọng**: Sau khi hệ thống chạy, bạn **phải cấu hình Proxy thủ công** trên trình duyệt hoặc điện thoại của mình:
-> - **Host (Máy chủ proxy):** `127.0.0.1` (nếu chạy trên cùng máy) hoặc IP mạng LAN của máy bạn (nếu dùng điện thoại).
-> - **Port (Cổng):** `8080`
-> 
-> Cuối cùng, truy cập trang `http://mitm.it` trên trình duyệt đó để tải và cài đặt chứng chỉ HTTPS.
-
-## 🛡️ Tính Năng Nổi Bật
-
-- **Bóc tách Tàng hình**: Lắng nghe và trích xuất dữ liệu từ các luồng traffic qua proxy mà không can thiệp, không làm chậm quá trình duyệt web của người dùng.
-- **Hỗ trợ HTTP/2**: Sẵn sàng đón nhận các luồng dữ liệu HTTP/2 cực nhanh, hoặc ép hạ cấp (force downgrade) xuống HTTP/1.1 (tránh lỗi 502 với các nền tảng quét proxy khắt khe).
-- **PostgreSQL Connection Pool**: Sử dụng `ThreadedConnectionPool` chuẩn công nghiệp để lưu trữ dữ liệu đồng thời, an toàn tuyệt đối ở môi trường đa luồng.
-- **Dashboard thời gian thực**: Theo dõi luồng dữ liệu, điều chỉnh cấu hình và xem log ngay trên trình duyệt, không cần nhìn chằm chằm vào console.
-- **Khả năng mở rộng**: Tận dụng kiến trúc Addon của Mitmproxy, bạn có thể dễ dàng viết thêm các đoạn script parse logic riêng cho các domain cụ thể (Platforms).
-
-## 📂 Kiến trúc Hệ thống & Luồng hoạt động (Workflow)
-
-Hệ thống Proxify được thiết kế để vượt qua các cơ chế Anti-Bot khắt khe nhất (như Cloudflare, Facebook Checkpoint) thông qua sự kết hợp của 3 thành phần lõi:
-1. **Chrome Extension:** Lấy Token bảo mật từ trình duyệt thật của người dùng.
-2. **CloakBrowser:** Trình duyệt ảo hóa chạy ngầm trên Server để bắt GraphQL Template.
-3. **StealthSessionManager (`curl_cffi`):** Động cơ giả lập TLS Fingerprint để bắn API ngầm tốc độ cao.
-
-### 🔄 Luồng hoạt động chi tiết (Facebook Crawler)
-
-**Giai đoạn 1: Chuẩn bị Vũ khí (Lấy Cookie & Template)**
-1. **Lấy Token (Cookie & fb_dtsg):** Người dùng cài đặt Chrome Extension của Proxify. Khi bấm nút "Get Cookie", Extension sẽ đọc toàn bộ Cookie của trang `facebook.com` và Inject Script để trích xuất mã `fb_dtsg`. Dữ liệu này được gửi ngầm về Proxify Backend (`/api/facebook/cookie`) và lưu tạm vào RAM (`IN_MEMORY_COOKIES`).
-2. **Kích hoạt thu thập:** Người dùng vào giao diện Web, nhập link Group và bấm "Bắt đầu thu thập" (`/api/facebook/crawl`).
-3. **Lấy Template (Khuôn đúc):** Backend mở một trình duyệt ảo **CloakBrowser** chạy ngầm (Headless). Trình duyệt này mang Cookie của người dùng lướt thẳng vào Group Facebook, kích hoạt các Request GraphQL. Lúc này, lõi Proxy (Mitmproxy) sẽ đứng giữa "chộp" (intercept) lại các Request này, bóc tách ra cái "Khuôn chuẩn" (chứa Headers và Payload ẩn như `__spin_r`, `jazoest`...) và lưu vào biến `IN_MEMORY_TEMPLATES`. Sau đó, trình duyệt ngầm lập tức đóng lại để giải phóng bộ nhớ.
-
-**Giai đoạn 2: Cào dữ liệu tốc độ cao (Bypass Anti-Bot)**
-1. **Lên đạn:** Hàm `start_crawler()` kết hợp Cookie thật và Khuôn đúc (Template) vừa lấy được.
-2. **Bắn Request (StealthSessionManager):** Lúc này Crawler **không dùng trình duyệt nữa**. Nó sử dụng thư viện `curl_cffi` (lõi C++) để gửi trực tiếp các HTTP POST request thẳng lên `/api/graphql/`. Khác với các thư viện thông thường như `requests` (rất dễ bị WAF phát hiện qua JA3 Fingerprint), `curl_cffi` có khả năng giả mạo chính xác **bộ vân tay mã hóa (TLS/JA3 Fingerprint) và cấu trúc HTTP/2** của một trình duyệt Chrome thực thụ, khiến hệ thống của Facebook bị lừa hoàn toàn.
-3. **Đồng bộ OS Fingerprint:** Hệ thống tự động phân tích User-Agent để cân chỉnh các header `Sec-Ch-Ua-Platform` khớp hoàn hảo (VD: User-Agent là Windows thì Header phải là Windows, tránh tình trạng curl_cffi mặc định là macOS), triệt tiêu hoàn toàn lỗi Checkpoint 1357001 của Facebook.
-
-**Giai đoạn 3: Phân tích & Lật trang**
-1. **Bóc tách:** Khối JSON khổng lồ trả về được đưa vào `extractor.py` để trích xuất `post_id`, nội dung bài viết, tác giả, số Like, v.v.
-2. **Lưu Database:** Dữ liệu đẩy vào PostgreSQL thông qua `ThreadedConnectionPool` đảm bảo an toàn đa luồng.
-3. **Lật trang & Retry:** Crawler tự động bóc tách mã `end_cursor` từ JSON, chèn lại vào "Khuôn" cho vòng lặp tiếp theo. Nếu gặp sự cố rớt mạng hoặc Rate Limit, thuật toán Exponential Backoff trong `StealthSessionManager` sẽ tự động tính toán thời gian trễ và gửi lại request một cách an toàn.
 
 ---
 
-## 📂 Cấu Trúc Thư Mục
+## 📂 Kiến Trúc Hệ Thống (Architecture)
 
-Codebase tuân thủ nghiêm ngặt các nguyên tắc **SOLID**, ứng dụng **Dependency Injection**, **Event-Driven Architecture (Pub/Sub)**, và **Repository Pattern**.
-
-```text
-proxify/
-├── __main__.py             # CLI Entry point
-├── server.py               # Khởi chạy mitmproxy và đăng ký các Event Listeners
-├── capture_addon.py        # Lõi Proxy Interceptor. Phát sóng các sự kiện `response_captured`
-├── storage.py              # Background worker xử lý Bulk Insert vào Database
-├── core/                   # 🧠 Lõi Điều phối Sự kiện (Event-Driven Engine)
-│   ├── events.py           # EventBus (Logic của Publisher/Subscriber)
-│   ├── interfaces.py       # Typing Protocols (VD: EventListener)
-│   └── listeners.py        # Subscribers (DashboardBroadcaster, DatabaseWriter)
-├── database/               # 💾 Quản lý Database
-│   ├── connection.py       # Singleton PostgreSQL ThreadedConnectionPool dùng chung
-│   └── setup.py            # Cài đặt cấu trúc bảng (schema) ban đầu
-├── platforms/              # 🌐 Các bộ Trích xuất dữ liệu theo từng nền tảng
-│   ├── facebook/           
-│   │   ├── database.py     # Facebook Database Facade
-│   │   ├── repository.py   # Repository Pattern cho Tác giả, Bài viết, Bình luận
-│   │   └── extractor.py    # Script chạy ngầm để bóc tách request thô thành dữ liệu chuẩn
-│   └── zalo/               # (Cấu trúc Repository tương tự như Facebook)
-├── plugins/                # 🔌 Các plugin cắm nóng để mở rộng tính năng proxy
-└── utils/                  # 🛠️ Các hàm hỗ trợ (VD: phân tích GraphQL)
+```mermaid
+graph TD
+    Client["📱 Client (Trình duyệt / Ứng dụng di động)"] -->|Proxy :8080| Core["🛡️ Lõi Proxify (Mitmproxy Engine)"]
+    Core --> Plugins["🔌 Plugins & Platforms (Facebook, Zalo, YouTube,...)"]
+    Plugins --> DB[("💾 Cơ Sở Dữ Liệu (PostgreSQL)")]
+    
+    UI["💻 React Web Dashboard (:8888)"] <-->|Giám sát & Điều khiển| Core
+    Extension["🧩 Chrome Extension Bridge"] <-->|Vượt Checkpoint / Anti-Bot| Plugins
 ```
 
-### 🔌 Kiến Trúc Plugin (Nguyên tắc Open/Closed)
+---
 
-Proxify tận dụng tối đa Kiến trúc Plugin động (Dynamic Plugin Architecture) để đảm bảo file lõi (`capture_addon.py`) luôn cực kỳ nhẹ gọn và không bị dính chặt (decoupled) vào các logic của từng trang web cụ thể.
+## 📂 Cấu Trúc Thư Mục (Directory Structure)
 
-- **Open (Mở để mở rộng):** Để cào dữ liệu từ một nền tảng mới (VD: TikTok, Shopee), bạn chỉ cần tạo một file mới thả vào thư mục `plugins/` và thêm decorator `@register_plugin("name")` ở đầu file.
-- **Closed (Đóng để sửa đổi):** Bạn không bao giờ cần phải đụng vào file `capture_addon.py` để thêm tính năng mới. Hệ thống sẽ tự động quét và phân luồng mạng (network flows) thẳng tới Plugin của bạn nếu nó khớp với biến `target_domains`.
+```text
+Proxify/
+├── backend/
+│   ├── chrome_extension/        # Chrome Extension Bridge (Background Service Worker & Content Script)
+│   ├── proxify/
+│   │   ├── core/                # Lõi điều phối hệ thống
+│   │   │   ├── router.py        # Fast Proxy Router phân luồng
+│   │   │   ├── traffic_storage/ # Worker lưu trữ traffic thô bất đồng bộ
+│   │   │   └── worker.py        # Background Normalization Worker
+│   │   ├── platforms/           # Bộ trích xuất nghiệp vụ chuyên sâu theo nền tảng
+│   │   │   ├── facebook/        # Facebook Engine (Crawler, Bridge, Auth, Extractor, API)
+│   │   │   └── zalo/            # Zalo Engine (Crypto Decryption, Models, Extractor, Database)
+│   │   ├── plugins/             # Các Plugin cắm nóng mở rộng
+│   │   │   ├── registry.py      # Plugin Registry & Auto-Discovery
+│   │   │   ├── facebook.py      # Facebook Traffic Adapter
+│   │   │   ├── zalo.py          # Zalo Traffic Adapter
+│   │   │   ├── youtube.py       # YouTube Ad-Stripper & Stream Interceptor
+│   │   │   └── tls_spoofer.py   # TLS JA3 ClientHello Spoofer
+│   │   ├── utils/               # Công cụ bổ trợ
+│   │   │   ├── stealth.py       # Nhận diện Soft-block, CAPTCHA, WAF Bypass
+│   │   │   ├── circuit_breaker.py # Cơ chế tự ngắt mạch chống sập
+│   │   │   ├── youtube_utils.py # Hàm bóc tách luồng & strip quảng cáo
+│   │   │   └── graphql.py       # Parser AST truy vấn GraphQL
+│   │   ├── server.py            # Mitmproxy DumpMaster & Clean Logging setup
+│   │   └── dashboard.py         # Metrics & Internal Dashboard
+│   └── tests/                   # Bộ kiểm thử tự động pytest
+├── frontend/                    # Giao diện Web hiện đại (React + TypeScript + Vite)
+│   ├── src/                     # Mã nguồn UI (Facebook Console, Traffic Viewer, Hooks)
+│   └── nginx.conf               # Nginx server cấu hình cho Docker
+├── docs/                        # Toàn bộ tài liệu kiến trúc & AI Developer Logs
+└── docker-compose.yml           # Khởi chạy đa dịch vụ (App, UI, Database)
+```
 
-Đặc biệt, các Plugins còn có khả năng tự chèn (inject) các API routes và UI tabs riêng của nó vào thẳng bảng điều khiển Web (Dashboard)!
+---
 
-## 🆘 Khắc Phục Sự Cố
+## 📜 Giấy Phép (License)
 
-### Lỗi trên Docker Desktop Windows: "Only one usage of each socket address"
-
-Nếu bạn gặp tình trạng proxy bị lặp vô hạn (infinite loop) báo lỗi `connectex: Only one usage of each socket address`, khả năng rất cao là Docker Desktop đang kế thừa cài đặt Proxy của Windows, khiến cho proxy tự đẩy request về lại chính nó.
-
-**Cách khắc phục:**
-1. Mở **Docker Desktop**.
-2. Chọn **Settings** (hình bánh răng) -> **Resources** -> **Proxies**.
-3. Tại phần **Containers proxy**, đổi thiết lập từ `Same as host proxy` thành **`No proxy`**.
-4. Nhấn **Apply & Restart**.
-
-Sau khi Docker khởi động lại, container có thể kết nối ra internet bình thường mà không bị lặp.
+Dự án được phân phối dưới giấy phép **MIT License**. Mọi đóng góp, báo lỗi (Issue) và Pull Request đều được chào đón!

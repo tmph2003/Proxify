@@ -1,16 +1,17 @@
 # Tài liệu: `proxify/platforms/facebook/database.py`
 
 ## 1. Tóm tắt tổng quan
-File `database.py` đóng vai trò là một Facade (mặt tiền) để quản lý toàn bộ các thao tác cơ sở dữ liệu (Database) liên quan đến nền tảng Facebook. Nó chịu trách nhiệm tự động khởi tạo schema (`facebook`) và các bảng (tables) cần thiết khi được import, đồng thời tạo ra một điểm truy cập duy nhất (singleton-like instance) `fb_db` tới các lớp Repository tương ứng.
+File `database.py` là trung tâm Data Access Layer hoàn chỉnh cho nền tảng Facebook. Nó hợp nhất toàn bộ các lớp Repository (`AuthorRepository`, `PostRepository`, `CommentRepository`, `ConfigRepository`) cùng lớp Facade `FacebookDatabase`. Nó chịu trách nhiệm tự động khởi tạo schema (`facebook`), tạo bảng DDL, quản lý kết nối và cung cấp singleton `fb_db` cho toàn ứng dụng. File `repository.py` được chuyển thành module re-export để đảm bảo tương thích ngược 100%.
 
 ## 2. Mục đích & Ý nghĩa
-- **Mục đích**: Tự động hóa quá trình thiết lập CSDL, tạo bảng, các chỉ mục (index) tăng tốc tìm kiếm và search_vector cho Full-text Search. Gom nhóm các Repository (Authors, Posts, Comments, Config) vào chung một class để dễ dàng gọi.
-- **Ý nghĩa**: Giúp mã nguồn quản lý CSDL trở nên tập trung, gọn gàng. Bất cứ mô-đun nào cần thao tác với DB Facebook chỉ cần import đối tượng `fb_db` từ file này. Đảm bảo tính toàn vẹn của cấu trúc CSDL mà không cần chạy file migration bằng tay.
+- **Mục đích**: Hợp nhất Repository Pattern và Facade Pattern vào một file duy nhất, co-locate DDL schema và logic SQL INSERT/UPDATE tương ứng.
+- **Ý nghĩa**: Giúp mã nguồn CSDL Facebook có tính gắn kết cực cao (High Cohesion), lập trình viên sửa bảng sẽ thấy ngay câu lệnh upsert ngay trong cùng file mà không phải nhảy qua lại giữa 2 file. Giảm phân mảnh mã nguồn mà vẫn giữ nguyên 100% tương thích ngược.
 
 ## 3. Mối liên hệ
-- Nó phụ thuộc vào `shared_pool` từ `proxify.database` để lấy kết nối PostgreSQL.
-- Gọi trực tiếp đến `AuthorRepository`, `PostRepository`, `CommentRepository`, `ConfigRepository` từ file `repository.py`.
-- Đối tượng `fb_db` sinh ra ở cuối file này được import bởi các crawler, extractor để lưu dữ liệu và đọc cấu hình (cookie, cursor).
+- Sử dụng `shared_pool` và `DatabasePool` từ `proxify.database`.
+- Tích hợp sẵn 4 Repository (`AuthorRepository`, `PostRepository`, `CommentRepository`, `ConfigRepository`) trực tiếp bên trong file.
+- `repository.py` re-export các lớp từ `database.py` để tránh break code cũ.
+- Đối tượng `fb_db` sinh ra ở cuối file này được import bởi toàn bộ `crawler.py`, `extractor.py`, `api.py`, `server.py` để lưu dữ liệu và cấu hình.
 
 ## 4. Rủi ro (Risks & Edge Cases)
 - **Init chậm/Tắt nghẽn**: Khi có nhiều bảng và index, hàm `_init_tables` có thể mất thời gian chạy khi ứng dụng vừa khởi động. Nếu CSDL bị treo, toàn bộ ứng dụng sẽ treo ngay lúc import.

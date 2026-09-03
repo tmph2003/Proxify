@@ -4,7 +4,7 @@
     <br>
     Proxify
     <br>
-    <small>The Ultimate Request Capture & Proxy Framework</small>
+    <small>The Ultimate Multi-Platform Request Capture & Reverse-Engineering Framework</small>
 </h1>
 
 <p align="center">
@@ -13,9 +13,11 @@
 
 <p align="center">
     <a href="https://python.org" alt="Python version">
-        <img alt="Python version" src="https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python"></a>
+        <img alt="Python version" src="https://img.shields.io/badge/Python-3.11%2B-blue?style=flat-square&logo=python"></a>
     <a href="https://mitmproxy.org/" alt="Mitmproxy">
         <img alt="Mitmproxy version" src="https://img.shields.io/badge/Mitmproxy-10.1%2B-red?style=flat-square"></a>
+    <a href="https://react.dev/" alt="React">
+        <img alt="React version" src="https://img.shields.io/badge/React-18%2B-61DAFB?style=flat-square&logo=react"></a>
     <a href="https://postgresql.org" alt="PostgreSQL">
         <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-Ready-336791?style=flat-square&logo=postgresql"></a>
     <a href="#" alt="License">
@@ -23,145 +25,171 @@
 </p>
 
 <p align="center">
-    <a href="#core-features"><strong>Features</strong></a>
+    <a href="#overview"><strong>Overview</strong></a>
+    &middot;
+    <a href="#core-features"><strong>Core Features</strong></a>
+    &middot;
+    <a href="#platforms"><strong>Platforms & Plugins</strong></a>
     &middot;
     <a href="#quick-start"><strong>Quick Start</strong></a>
     &middot;
-    <a href="#platforms"><strong>Platforms</strong></a>
+    <a href="#architecture"><strong>Architecture</strong></a>
     &middot;
-    <a href="#dashboard"><strong>Dashboard</strong></a>
-    &middot;
-    <a href="#cli"><strong>CLI</strong></a>
+    <a href="#structure"><strong>Directory Structure</strong></a>
 </p>
 
-**Proxify** is a powerful HTTP/HTTPS request interception and analysis framework built on top of `mitmproxy`.
+---
 
-Designed to run silently in the background, it automatically collects, parses, and stores requests from various platforms (Zalo, Facebook, Shopee, etc.) into a PostgreSQL database for Data Extraction, Analytics, or Reverse Engineering.
+## 🌟 Overview
 
-The system is multi-threaded, memory-optimized, and comes with a real-time Web Dashboard. Capture everything, without missing a single byte!
+**Proxify** is a comprehensive framework engineered for **traffic interception, reverse-engineering, and automated data extraction** across HTTP, HTTPS, HTTP/2, and WebSocket protocols.
 
-```python
-# Powerful integration with multiple Platforms
-from proxify.platforms.zalo import zalo_db
+Built on the industrial-grade **Mitmproxy 10** engine, Proxify seamlessly unites:
+1. **Multi-Threaded Proxy Core**: Silent interception, HTTPS TLS decryption, and high-throughput raw traffic ingestion into PostgreSQL.
+2. **Anti-Bot & WAF Bypass Engine**: Intelligent detection and evasion of modern bot protections (Cloudflare Turnstile, Facebook Checkpoint, Akamai) via TLS/JA3 impersonation and a Chrome Extension First-Party Tab Bridge.
+3. **Pluggable Multi-Platform Architecture**: Out-of-the-box support for **Facebook**, **Zalo**, and **YouTube**, alongside a dynamic plugin system ready to scale to TikTok, Shopee, Telegram, and beyond.
+4. **Interactive Real-Time Dashboard**: A modern React-powered UI featuring a Live Traffic Inspector (akin to Fiddler/Charles/Burp Suite), platform-specific management consoles, session persistence, and crawling controllers.
 
-# Automatically store extracted data into PostgreSQL
-zalo_db.groups.upsert(
-    group_id="12345", 
-    name="Data Extraction Group", 
-    members=150
-)
-```
+---
 
-Or run the powerful CLI Server mode:
+## 🛡️ Core Features
 
-```bash
-# Start proxy server on port 9090 and monitor facebook.com
-python -m proxify --port 9090 --dashboard-port 9999 --domain facebook.com
-```
+### 1. Stealth MITM Interception & Decryption
+- **Full HTTPS/TLS Decryption**: Generates and manages trusted CA root certificates to decrypt encrypted traffic across desktop browsers, mobile apps (Android/iOS), and emulators.
+- **HTTP/2 & WebSocket Streaming**: Native handling of multiplexed HTTP/2 frames and persistent WebSocket duplex streams (e.g., Zalo chat sockets, Facebook Lightspeed).
+- **Asynchronous Traffic Storage**: Offloads raw requests/responses to an asynchronous PostgreSQL pipeline (`TrafficStorageWorker`) with zero latency impact on live browsing.
+- **Clean Logging Engine**: Employs `PollingEndpointFilter` to silence routine `200 OK` polling noise, delivering a tranquil, high-signal console.
+
+### 2. Anti-Bot Bypass & Stealth Suite
+- **Soft-Block Detection (`stealth.py`)**: Automatically detects Cloudflare challenge pages, CAPTCHAs, and 429/503 rate-limit states to trigger intelligent exponential backoff.
+- **Chrome Extension First-Party Tab Bridge**: Executes requests directly within the user's authentic Facebook/site browser tab, fully inheriting real cookies, local IP, and browser context to **eliminate 1357001 logout errors**.
+- **Circuit Breaker Resilience**: Prevents cascading failures and server bans by auto-throttling requests when upstream targets show distress.
+
+### 3. Hot-Pluggable Dynamic Plugin System
+- Follows the **Open/Closed Principle**: Extend Proxify to any new service simply by subclassing `BasePlugin` and adding the `@register_plugin("name")` decorator.
+- Lifecycle hooks available: `on_request()`, `on_response()`, `on_websocket_message()`, and `on_error()`.
+
+---
+
+## 🌐 Supported Platforms & Plugins
+
+### 📘 1. Facebook Platform (`platforms/facebook/`)
+- **Decoupled Feed & Comment Engine (50x Faster)**: Super-fast chronological feed scraping (~1.5s/page) decoupled from deep comment extraction.
+- **Automatic Unfiltered Comments**: Automatically enforces `CHRONOLOGICAL_UNFILTERED_INTENT_V1` to capture 100% of all comments without manual UI toggles.
+- **Bi-Directional Relay Pagination**: Comprehensive handling of both `before` and `after` cursors up to 500 pages (~5,000 comments/post).
+- **Live Start / Stop Toggle Controls**: Immediate cancellation of background comment scraping tasks.
+- **Facebook Dashboard Console**: Group selector, author filters, full-text search, and multi-level comment hierarchy viewer.
+
+### 💬 2. Zalo Platform (`platforms/zalo/` & `plugins/zalo.py`)
+- **Protocol & Crypto Decryption**: Uses an embedded JavaScript runtime (`crypto_subtle.js`) to decrypt end-to-end encrypted packets and WebSocket messages from Zalo Web.
+- **Message & Contact Extractor**: Automatically parses chat messages, group memberships, and contact books into structured PostgreSQL tables (`database.py`, `models.py`, `repository.py`).
+- **Dedicated Zalo Web UI**: Independent interface (`zalo.html`, `zalo.js`) for inspecting decrypted Zalo messages and contacts in real-time.
+
+### 🎥 3. YouTube Plugin (`plugins/youtube.py` & `utils/youtube_utils.py`)
+- **Ad-Stripping Engine**: Automatically identifies and strips video/audio advertising segments from streaming payloads (`strip_youtube_ads`).
+- **Stream URL Interceptor**: Extracts direct media streaming URLs for background playback and offline storage.
+
+### 🔌 4. TLS Spoofer Plugin (`plugins/tls_spoofer.py`)
+- Impersonates standard Google Chrome TLS ClientHello configurations and Cipher Suites, disguising proxy connections from JA3 fingerprint monitors.
 
 ---
 
 ## 🚀 Quick Start
 
-Getting started is extremely simple.
+### Method 1: Docker Compose (Recommended)
+
+Start the entire stack (Backend Proxy + PostgreSQL + React UI) with a single command:
 
 ```bash
-# 1. Install dependencies
+# 1. Clone the repository
+git clone https://github.com/tmph2003/Proxify.git
+cd Proxify
+
+# 2. Launch all services
+docker compose up -d
+```
+
+Access your environment:
+- **Web Dashboard (React UI):** `http://localhost:8888`
+- **Proxy Server (Mitmproxy):** `http://localhost:8080`
+- **PostgreSQL Database:** Port `5432`
+
+> 💡 **One-Time SSL Certificate Setup:**  
+> Route your browser/device traffic through `127.0.0.1:8080`, then visit `http://mitm.it` in your browser to install the Mitmproxy Root CA certificate.
+
+---
+
+### Method 2: Manual Development Mode
+
+```bash
+# 1. Install Python requirements
 pip install -r requirements.txt
 
-# 2. Configure environment variables
+# 2. Configure environment
 cp .env.example .env
-# Edit your .env file with your specific DB_DSN, PROXY_PORT, etc.
 
-# 3. Start Proxify
+# 3. Start Proxy Backend
 python -m proxify
+
+# 4. Start React Frontend (in a separate terminal)
+cd frontend
+npm install
+npm run dev
 ```
-> ⚠️ **Important**: Once the system is running, you **must manually configure the Proxy** on your browser or phone:
-> - **Host:** `127.0.0.1` (if running on the same machine) or your machine's LAN IP (if using a phone).
-> - **Port:** `8080`
-> 
-> Finally, navigate to `http://mitm.it` in that browser to download and install the HTTPS certificate.
 
-## 🛡️ Core Features
+---
 
-- **Stealthy Request Capture**: Listens and extracts data from traffic passing through the proxy without interfering with the user's main data flow.
-- **HTTP/2 Support**: Ready to capture ultra-fast HTTP/2 streams, or force downgrade to HTTP/1.1 (to avoid 502 errors on strict platforms).
-- **PostgreSQL Connection Pool**: Built-in, industry-standard `ThreadedConnectionPool` for safe, multi-threaded data storage.
-- **Real-time Dashboard**: Monitor traffic, configure proxy settings, and view logs directly from your browser—no need to stare at the terminal console.
-- **Highly Extensible**: Mitmproxy's Addon architecture allows you to easily write custom parsing logic for specific domains (Platforms).
+## 📂 Architecture Overview
 
-## 📂 System Architecture & Workflow
-
-The Proxify system is designed to bypass strict anti-bot mechanisms (e.g., Cloudflare, Facebook Checkpoint) through the combination of 3 core components:
-1. **Chrome Extension:** Extracts security tokens from the user's real browser.
-2. **CloakBrowser:** A virtualized, headless browser running on the server to capture GraphQL Templates.
-3. **StealthSessionManager (`curl_cffi`):** A TLS Fingerprint spoofing engine for high-speed, stealthy API requests.
-
-### 🔄 Detailed Workflow (Facebook Crawler)
-
-**Phase 1: Preparation (Fetching Cookie & Template)**
-1. **Token Extraction (Cookie & fb_dtsg):** The user installs the Proxify Chrome Extension. Upon clicking "Get Cookie", the extension reads all cookies from `facebook.com` and injects a script to extract the `fb_dtsg` token. This data is silently sent to the Proxify Backend (`/api/facebook/cookie`) and stored temporarily in RAM (`IN_MEMORY_COOKIES`).
-2. **Triggering the Crawl:** The user accesses the Web UI, enters a Facebook Group link, and clicks "Start Crawling" (`/api/facebook/crawl`).
-3. **Template Fetching:** The backend launches a hidden **CloakBrowser** instance. This browser utilizes the user's cookies to navigate to the Facebook Group, triggering legitimate GraphQL requests. The Mitmproxy core intercepts these requests, extracts the "Template" (Headers and hidden payload fields like `__spin_r`, `jazoest`), and saves it to `IN_MEMORY_TEMPLATES`. The headless browser is then immediately closed to free up memory.
-
-**Phase 2: High-Speed Crawling (Anti-Bot Bypass)**
-1. **Initialization:** The `start_crawler()` function merges the user's authentic cookie with the newly acquired Template.
-2. **Firing Requests (StealthSessionManager):** The crawler **no longer uses a browser**. Instead, it uses `curl_cffi` (a C++ core library) to send HTTP POST requests directly to `/api/graphql/`. Unlike standard libraries (like `requests`), which are easily detected by WAFs via their JA3 Fingerprints, `curl_cffi` perfectly spoofs the **TLS/JA3 fingerprint and HTTP/2 characteristics** of a real Google Chrome browser, completely bypassing Facebook's detection systems.
-3. **OS Fingerprint Synchronization:** The system automatically analyzes the provided User-Agent to align the `Sec-Ch-Ua-Platform` headers perfectly (e.g., matching Windows User-Agent with Windows headers, overriding curl_cffi's macOS defaults). This eliminates Facebook Checkpoint Error 1357001 entirely.
-
-**Phase 3: Parsing & Pagination**
-1. **Extraction:** The massive JSON response is passed to `extractor.py` to extract `post_id`, message text, author details, reaction counts, etc.
-2. **Database Storage:** The parsed data is inserted into PostgreSQL via the thread-safe `ThreadedConnectionPool`.
-3. **Pagination & Retry:** The crawler extracts the `end_cursor` from the JSON and injects it back into the Template for the next loop. In case of network drops or rate limits, the Exponential Backoff algorithm inside `StealthSessionManager` calculates a safe delay and automatically retries the request.
+```mermaid
+graph TD
+    Client["📱 Client Traffic (Browser / Mobile / App)"] -->|Proxy :8080| Core["🛡️ Proxify Core (Mitmproxy Engine)"]
+    Core --> Plugins["🔌 Plugins & Platforms (Facebook, Zalo, YouTube,...)"]
+    Plugins --> DB[("💾 PostgreSQL Database")]
+    
+    UI["💻 React Web Dashboard (:8888)"] <-->|Control & Monitor| Core
+    Extension["🧩 Chrome Extension Bridge"] <-->|Anti-Bot Tab Execution| Plugins
+```
 
 ---
 
 ## 📂 Directory Structure
 
-The codebase follows strict **SOLID** principles, utilizing **Dependency Injection**, **Event-Driven Architecture (Pub/Sub)**, and the **Repository Pattern**.
-
 ```text
-proxify/
-├── __main__.py             # CLI Entry point
-├── server.py               # Starts mitmproxy and registers Event Listeners
-├── capture_addon.py        # Core Proxy Interceptor. Emits `response_captured` events
-├── storage.py              # Background worker for Bulk Database inserts
-├── core/                   # 🧠 Core Event-Driven Engine
-│   ├── events.py           # EventBus (Publisher/Subscriber logic)
-│   ├── interfaces.py       # Typing Protocols (e.g., EventListener)
-│   └── listeners.py        # Subscribers (DashboardBroadcaster, DatabaseWriter)
-├── database/               # 💾 Database Management
-│   ├── connection.py       # Shared singleton PostgreSQL ThreadedConnectionPool
-│   └── setup.py            # Initial DB schema setups
-├── platforms/              # 🌐 Platform-specific Data Extractors
-│   ├── facebook/           
-│   │   ├── database.py     # Facebook Database Facade
-│   │   ├── repository.py   # Repository Pattern for Authors, Posts, Comments
-│   │   └── extractor.py    # Background script to parse raw requests into structured data
-│   └── zalo/               # (Similar Repository structure as Facebook)
-├── plugins/                # 🔌 Drop-in plugins for extended proxy functionality
-└── utils/                  # 🛠️ Helper functions (e.g., GraphQL parsing)
+Proxify/
+├── backend/
+│   ├── chrome_extension/        # Browser Extension Bridge (Service Worker & Content Script)
+│   ├── proxify/
+│   │   ├── core/                # System orchestration
+│   │   │   ├── router.py        # Fast Proxy Router
+│   │   │   ├── traffic_storage/ # Asynchronous raw traffic persistence
+│   │   │   └── worker.py        # Normalization background worker
+│   │   ├── platforms/           # Specialized platform engines
+│   │   │   ├── facebook/        # Facebook (Crawler, Bridge, Auth, Extractor, API)
+│   │   │   └── zalo/            # Zalo (Crypto Decryption, Models, Extractor, DB)
+│   │   ├── plugins/             # Dynamic drop-in plugins
+│   │   │   ├── registry.py      # Plugin Registry & Auto-Discovery
+│   │   │   ├── facebook.py      # Facebook Traffic Adapter
+│   │   │   ├── zalo.py          # Zalo Traffic Adapter
+│   │   │   ├── youtube.py       # YouTube Ad-Stripper & Stream Interceptor
+│   │   │   └── tls_spoofer.py   # TLS ClientHello / JA3 Spoofer
+│   │   ├── utils/               # Shared utilities
+│   │   │   ├── stealth.py       # Soft-block detection & WAF bypass
+│   │   │   ├── circuit_breaker.py # Circuit breaker resilience
+│   │   │   ├── youtube_utils.py # Media stream extraction & ad removal
+│   │   │   └── graphql.py       # GraphQL AST parser
+│   │   ├── server.py            # Mitmproxy DumpMaster & Clean Logging setup
+│   │   └── dashboard.py         # Internal metrics dashboard
+│   └── tests/                   # Pytest test suite
+├── frontend/                    # Modern React Web Dashboard (React + Vite + TypeScript)
+│   ├── src/                     # UI components, state hooks, traffic viewers
+│   └── nginx.conf               # Nginx production web server configuration
+├── docs/                        # Architecture documentation & AI Developer Changelog
+└── docker-compose.yml           # Multi-container orchestration (App, UI, Database)
 ```
 
-### 🔌 Plugin Architecture (Open/Closed Principle)
+---
 
-Proxify utilizes a dynamic Plugin Architecture to ensure the core interceptor (`capture_addon.py`) remains extremely lightweight and completely decoupled from domain-specific logic.
+## 📜 License
 
-- **Open for Extension:** To capture data from a new platform (e.g., TikTok, Shopee), simply drop a new file into the `plugins/` directory and use the `@register_plugin("name")` decorator.
-- **Closed for Modification:** You never need to modify the core `capture_addon.py` file to add new functionality. The system automatically discovers and routes matching network flows to your plugin based on the `target_domains` you define.
-
-Plugins can also inject their own API routes and UI tabs directly into the web Dashboard!
-
-## 🆘 Troubleshooting
-
-### Docker Desktop on Windows: "Only one usage of each socket address"
-
-If you encounter an infinite loop error (`connectex: Only one usage of each socket address`) when connecting to the proxy, it is highly likely that Docker Desktop is inheriting your Windows Proxy settings, causing the proxy to forward requests to itself.
-
-**Solution:**
-1. Open **Docker Desktop**.
-2. Go to **Settings** (Gear icon) -> **Resources** -> **Proxies**.
-3. Under **Containers proxy**, change the setting from `Same as host proxy` to **`No proxy`**.
-4. Click **Apply & Restart**.
-
-Once Docker restarts, the container will be able to connect to the internet normally without creating an infinite loop.
+This project is licensed under the **MIT License**. Contributions, issues, and feature requests are welcome!
