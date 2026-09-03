@@ -1,4 +1,5 @@
 import asyncio
+import time
 import uuid
 import logging
 from typing import Dict, Any, Optional
@@ -12,12 +13,18 @@ class ExtensionBridge:
         self.pending_jobs: Dict[str, dict] = {}
         self.results: Dict[str, Any] = {}
         self.events: Dict[str, asyncio.Event] = {}
+        self.last_poll_time: float = 0.0
+
+    def is_connected(self, threshold: float = 60.0) -> bool:
+        """Check if the Chrome extension has polled for jobs recently."""
+        return (time.time() - self.last_poll_time) < threshold
 
     def has_jobs(self) -> bool:
         return len(self.pending_jobs) > 0
 
     def get_job(self) -> Optional[dict]:
-        """Get the oldest pending job."""
+        """Get the oldest pending job and update heartbeat."""
+        self.last_poll_time = time.time()
         if not self.pending_jobs:
             return None
         # Pop the first job
@@ -30,28 +37,34 @@ class ExtensionBridge:
         
         # Clean up headers, only send what's strictly necessary if we are running in browser.
         # Actually, if we run in browser, we don't need cookie or user-agent because browser sends it automatically!
-        # But we MUST send content-type and X-ASBD-ID etc if required for GraphQL.
         safe_headers = {}
+        target_group_url = ""
         if headers:
             for k, v in headers.items():
                 k_lower = k.lower()
+                if k_lower == "referer" and "/groups/" in v:
+                    target_group_url = v
                 # Skip forbidden headers in Fetch API
                 if k_lower in ["cookie", "user-agent", "host", "referer", "origin", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "accept-encoding", "connection"]:
                     continue
                 safe_headers[k] = v
+
+        if method.upper() == "POST":
+            safe_headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
 
         job = {
             "id": job_id,
             "url": url,
             "method": method,
             "headers": safe_headers,
-            "body": data
+            "body": data,
+            "target_group_url": target_group_url
         }
         
         self.pending_jobs[job_id] = job
         self.events[job_id] = asyncio.Event()
         
-        logger.info(f"[Bridge] Dispatched job {job_id} to Extension")
+        logger.debug(f"[Bridge] Dispatched job {job_id} to Extension")
         
         try:
             # Wait for result with timeout
@@ -72,7 +85,11 @@ class ExtensionBridge:
             self.events[job_id].set()
             # Clean up event later
             self.events.pop(job_id, None)
-            logger.info(f"[Bridge] Job {job_id} completed by Extension")
+            in_tab = data.get("executed_in_tab", False)
+            tab_url = data.get("tab_url", "N/A")
+            tab_id = data.get("tab_id", "N/A")
+            err_detail = data.get("tab_error", "")
+            logger.debug(f"[Bridge] Job {job_id} completed: in_tab={in_tab}, tab_id={tab_id}, tab_url={tab_url}, err={err_detail}")
         else:
             logger.warning(f"[Bridge] Received result for unknown/expired job {job_id}")
 

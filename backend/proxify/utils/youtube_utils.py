@@ -2,7 +2,7 @@ import re
 
 def is_youtube_ad_request(url: str, domain: str) -> bool:
     """Check if the current HTTP flow matches known YouTube ad or tracking patterns."""
-    if 'youtube.com' not in domain and 'googlevideo.com' not in domain and 'youtubei' not in url and 'doubleclick.net' not in domain:
+    if 'youtube.com' not in domain and 'googlevideo.com' not in domain and 'youtubei' not in url:
         return False
 
     url_lower = url.lower()
@@ -17,9 +17,6 @@ def is_youtube_ad_request(url: str, domain: str) -> bool:
         return True
 
     if '/pagead/interaction/' in url_lower or '/pagead/viewthroughconversion/' in url_lower:
-        return True
-        
-    if 'doubleclick.net' in domain:
         return True
         
     if 'ad_' in url_lower:

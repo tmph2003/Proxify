@@ -15,6 +15,30 @@ from proxify.plugins.zalo import ZaloPlugin
 
 logger = logging.getLogger("proxify.server")
 
+class PollingEndpointFilter(logging.Filter):
+    """Filters out repetitive polling requests (200/304 OK) to keep console logs clean."""
+    IGNORED_PATHS = (
+        "/api/facebook/bridge/jobs",
+        "/api/facebook/bulk_status",
+        "/api/facebook/crawl_status",
+        "/api/facebook/comment_status",
+        "/api/facebook/cookie",
+        "/api/stats",
+        "/api/status",
+        "/ws",
+    )
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        # Suppress successful polling responses
+        if " 200 " in msg or " 304 " in msg:
+            for path in self.IGNORED_PATHS:
+                if path in msg:
+                    return False
+        return True
+
+# Attach filter to aiohttp access logger
+logging.getLogger("aiohttp.access").addFilter(PollingEndpointFilter())
+
 class ProxyAddon:
     """The central Mitmproxy Addon that delegates to the fast Router."""
     def __init__(self, router: ProxyRouter):
@@ -33,21 +57,25 @@ class V1GlobalObserver:
     """Wraps V1 interceptors to bridge mitmproxy flows to the legacy Global Dashboard."""
     target_domains = [] # Listen to all domains
     
-    def __init__(self, broadcast_fn, storage):
+    def __init__(self, broadcast_fn, storage, ignored_hosts: list[str] = None):
         from proxify.core.listeners import DashboardBroadcaster, DatabaseWriter
         self.broadcaster = DashboardBroadcaster(broadcast_fn)
         self.db_writer = DatabaseWriter(storage)
+        self.ignored_hosts = [h.strip().lower() for h in (ignored_hosts or []) if h.strip()]
         
     async def handle_request(self, flow):
         pass
         
     async def handle_response(self, flow):
+        domain = (flow.request.pretty_host or "").lower()
+        if any(h in domain for h in self.ignored_hosts):
+            return
+
         # Determine whether DB save is allowed based on V1 storage settings
         db_save = getattr(self.db_writer.storage, 'db_integration_enabled', False)
         if db_save:
             allowed_domains = getattr(self.db_writer.storage, 'db_allowed_domains', [])
             if allowed_domains:
-                domain = flow.request.pretty_host or ""
                 if not any(d in domain for d in allowed_domains):
                     db_save = False
 
@@ -83,8 +111,15 @@ async def run_server():
     worker = BackgroundWorker(db_manager)
     worker.start()
 
+    # 2.5 Parse ignored hosts
+    import re
+    raw_ignore = os.getenv("IGNORE_HOSTS", "trino.sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com")
+    ignored_hosts = [h.strip() for h in raw_ignore.split(",") if h.strip()]
+    ignore_patterns = [re.escape(h) for h in ignored_hosts]
+    logger.info(f"🚫 Ignored Hosts (Passthrough): {ignored_hosts}")
+
     # 3. Initialize Router & Platforms
-    router = ProxyRouter()
+    router = ProxyRouter(ignored_hosts=ignored_hosts)
     
     # In a real app, this would use a registry to auto-discover platforms
     fb_platform = FacebookPlatform(event_bus)
@@ -97,18 +132,19 @@ async def run_server():
 
     # 4. Start Mitmproxy in the same event loop
     proxy_port = int(os.environ.get("PROXY_PORT", 8080))
-    opts = Options(listen_host="0.0.0.0", listen_port=proxy_port, ssl_insecure=True, http2=False)
+    opts = Options(
+        listen_host="0.0.0.0",
+        listen_port=proxy_port,
+        ssl_insecure=True,
+        http2=False,
+        ignore_hosts=ignore_patterns,
+    )
     master = DumpMaster(opts, with_termlog=True, with_dumper=False)
     master.addons.add(ProxyAddon(router))
     
-    # Enable stealth mode for Facebook domains
-    try:
-        from proxify.stealth_addon import StealthUpstreamAddon
-        stealth = StealthUpstreamAddon(target_domains=["facebook.com"])
-        master.addons.add(stealth)
-        logger.info("🛡️  Stealth Mode ENABLED in v2")
-    except ImportError:
-        logger.warning("Stealth module not found, skipping stealth mode.")
+    # Note: Facebook domains MUST NOT use StealthUpstreamAddon replay.
+    # The user's real Chrome browser already has native TLS fingerprint.
+    # Intercepting Chrome's live Facebook requests with curl_cffi causes Meta to detect session hijacking and log out!
 
     # Load YouTube Plugin for ad-blocking
     try:
@@ -121,7 +157,7 @@ async def run_server():
         logger.error(f"Failed to load YouTube plugin: {e}")
 
     # 4.5. Initialize V1 RequestStorage and Global Observer
-    from proxify.storage import RequestStorage
+    from proxify.core.traffic_storage import RequestStorage
     storage = RequestStorage()
     
     # The V1 observer needs the `broadcast` function from the Dashboard.
@@ -143,7 +179,7 @@ async def run_server():
         _deferred_broadcast({"req_uuid": req_uuid, "row_id": row_id}, msg_type="update_id")
     v1_bus.subscribe("db_row_created", on_db_row_created)
             
-    global_observer = V1GlobalObserver(_deferred_broadcast, storage)
+    global_observer = V1GlobalObserver(_deferred_broadcast, storage, ignored_hosts=ignored_hosts)
     router.register_observer(global_observer)
     
     # 5. Start aiohttp dashboard

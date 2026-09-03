@@ -3,7 +3,7 @@ import queue
 import threading
 from abc import ABC, abstractmethod
 
-logger = logging.getLogger("proxify.storage.workers")
+logger = logging.getLogger("proxify.core.traffic_storage.workers")
 _COMMIT_BATCH_SIZE = 50  # Hardcoded or imported, but we can set a default
 
 class BackgroundWorker(ABC):

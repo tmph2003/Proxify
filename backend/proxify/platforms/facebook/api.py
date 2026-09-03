@@ -40,6 +40,7 @@ class FacebookAPI:
             web.patch("/api/facebook/post_status", self._handle_post_status),
             web.get("/api/facebook/bulk_status", self._handle_bulk_status),
             web.post("/api/facebook/stop_crawl", self._handle_stop_crawl),
+            web.post("/api/facebook/stop_comment_crawl", self._handle_stop_comment_crawl),
             
             # Bridge Endpoints
             web.get("/api/facebook/bridge/jobs", self._handle_bridge_jobs),
@@ -48,8 +49,10 @@ class FacebookAPI:
 
     async def _handle_bridge_jobs(self, request: web.Request) -> web.Response:
         """Extension polls this endpoint for jobs (Short-Polling)."""
+        import time
         from proxify.platforms.facebook.bridge import bridge
         
+        bridge.last_poll_time = time.time()
         job = bridge.get_job()
         if job:
             return web.json_response({"job": job})
@@ -78,6 +81,17 @@ class FacebookAPI:
             return web.json_response({"status": "ok", "message": "Đã gửi lệnh dừng thu thập dữ liệu."})
         except Exception as e:
             logger.error(f"Error stopping crawl: {e}")
+            return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+    async def _handle_stop_comment_crawl(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json() if request.can_read_body else {}
+            post_id = body.get("post_id")
+            from proxify.platforms.facebook.crawler import _default_crawler
+            _default_crawler.stop_comment_crawling(post_id)
+            return web.json_response({"status": "ok", "message": "Đã gửi lệnh dừng cào bình luận."})
+        except Exception as e:
+            logger.error(f"Error stopping comment crawl: {e}")
             return web.json_response({"status": "error", "message": str(e)}, status=500)
 
     async def _handle_get_groups(self, request: web.Request) -> web.Response:
@@ -146,21 +160,28 @@ class FacebookAPI:
 
         import asyncio
         from datetime import datetime, timezone
-        from proxify.platforms.facebook.crawler import start_crawler, group_crawl_state
+        from proxify.platforms.facebook.crawler import start_crawler, group_crawl_state, is_any_comment_crawling
+
+        # Mutually exclusive crawling: block post crawl if comment crawl is running
+        if is_any_comment_crawling():
+            return web.json_response({
+                "status": "error",
+                "message": "⚠️ Đang có tiến trình cào bình luận (Comment) đang chạy. Vui lòng chờ hoàn tất trước khi cào bài viết."
+            }, status=400)
         
         try:
             # Parse dates and convert to UTC timestamps
-            start_ts = int(datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+            start_ts = int(datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) if start_date_str else 0
             # Inclusive end date (+24h)
-            end_ts = int(datetime.strptime(end_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) + 86400
+            end_ts = int(datetime.strptime(end_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) + 86400 if end_date_str else 0
             
-            if start_ts > end_ts:
+            if start_ts and end_ts and start_ts > end_ts:
                 return web.json_response({"status": "error", "message": "start_date cannot be greater than end_date"}, status=400)
                 
         except Exception as e:
             return web.json_response({"status": "error", "message": f"Invalid date format: {e}"}, status=400)
             
-        from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+        from proxify.platforms.facebook.auth import IN_MEMORY_TEMPLATES
         
         # Extract User-Agent from the incoming request (crucial for Facebook fingerprinting)
         client_ua = request.headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36")
@@ -191,7 +212,7 @@ class FacebookAPI:
                 
                 # INJECT FRESH auth headers from Extension if available
                 # This fixes Facebook Error 1357001 caused by fb_dtsg mismatch when cookie is pasted/updated via UI
-                from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+                from proxify.platforms.facebook.auth import IN_MEMORY_TEMPLATES
                 fb_dtsg = IN_MEMORY_COOKIES.get("fb_dtsg")
                 lsd = IN_MEMORY_COOKIES.get("lsd")
                 
@@ -268,10 +289,12 @@ class FacebookAPI:
             return web.json_response({"status": "error", "message": str(e)}, status=500)
 
     async def _handle_crawl_status(self, request: web.Request) -> web.Response:
-        from proxify.platforms.facebook.crawler import refresh_progress, group_crawl_state
+        from proxify.platforms.facebook.crawler import refresh_progress, group_crawl_state, is_any_comment_crawling, is_post_crawling
         return web.json_response({
             "refresh": refresh_progress,
-            "group_crawl": group_crawl_state
+            "group_crawl": group_crawl_state,
+            "is_comment_crawling": is_any_comment_crawling(),
+            "is_post_crawling": is_post_crawling(),
         })
 
     async def _handle_facebook_results(self, request: web.Request) -> web.Response:
@@ -412,9 +435,11 @@ class FacebookAPI:
                 comments_records = await conn.fetch("""
                     SELECT c.comment_id, c.post_id, c.parent_comment_id,
                            c.author_id, c.author_name, c.body_text,
+                           c.body_text AS message_text,
                            c.creation_time, c.creation_datetime,
                            c.reaction_count, c.reply_count,
-                           a.avatar_url
+                           a.avatar_url,
+                           a.avatar_url AS author_avatar
                     FROM facebook.comments c
                     LEFT JOIN facebook.authors a ON c.author_id = a.id
                     WHERE c.post_id = $1
@@ -446,6 +471,9 @@ class FacebookAPI:
             post_id = body.get("post_id", "")
             feedback_id = body.get("feedback_id", "")
             cookie = body.get("cookie", "")
+            fb_dtsg = body.get("fb_dtsg", "")
+            if fb_dtsg:
+                IN_MEMORY_COOKIES["fb_dtsg"] = fb_dtsg
             
             logger.info(f">>> UI CRAWL REQUEST RECEIVED! post_id: {post_id}, feedback_id: {feedback_id}, cookie_snippet: {cookie[:20] if cookie else 'None'}")
             
@@ -453,6 +481,14 @@ class FacebookAPI:
                 return web.json_response(
                     {"status": "error", "message": "post_id is required"}, status=400
                 )
+
+            from proxify.platforms.facebook.crawler import is_post_crawling
+            # Mutually exclusive crawling: block comment crawl if post crawl is running
+            if is_post_crawling():
+                return web.json_response({
+                    "status": "error",
+                    "message": "⚠️ Đang có tiến trình cào bài viết (Post) đang chạy. Vui lòng chờ hoàn tất trước khi cào bình luận."
+                }, status=400)
             
             # If no feedback_id provided, look it up from the database
             if not feedback_id:
@@ -471,10 +507,9 @@ class FacebookAPI:
                     logger.warning(f"Failed to look up feedback_id from DB: {e}")
 
             if not feedback_id:
-                return web.json_response({
-                    "status": "error",
-                    "message": "Không tìm thấy feedback_id. Vui lòng cào lại group để cập nhật dữ liệu bài viết."
-                }, status=400)
+                import base64
+                feedback_id = base64.b64encode(f"feedback:{post_id}".encode()).decode()
+                logger.info(f"Synthesized feedback_id {feedback_id} for post {post_id}")
 
             cookie = body.get("cookie", "")
             
@@ -511,7 +546,7 @@ class FacebookAPI:
         from proxify.platforms.facebook.crawler import get_comment_progress
         progress = get_comment_progress(post_id)
         
-        logger.info(f">>> UI STATUS POLL RECEIVED! post_id: {post_id}, progress_found: {progress is not None}")
+        logger.debug(f">>> UI STATUS POLL RECEIVED! post_id: {post_id}, progress_found: {progress is not None}")
         
         if progress:
             return web.json_response({"status": "ok", "progress": progress})
@@ -565,6 +600,13 @@ class FacebookAPI:
             task_id = f"bulk_{action}_{id(post_ids)}"
             
             if action == "crawl_comments":
+                from proxify.platforms.facebook.crawler import is_post_crawling
+                if is_post_crawling():
+                    return web.json_response({
+                        "status": "error",
+                        "message": "⚠️ Đang có tiến trình cào bài viết (Post) đang chạy. Vui lòng chờ hoàn tất trước khi cào bình luận hàng loạt."
+                    }, status=400)
+
                 self._bulk_progress[task_id] = {"status": "running", "current": 0, "total": len(post_ids), "message": "Đang khởi tạo..."}
                 
                 async def _bg_bulk_crawl():
@@ -585,11 +627,21 @@ class FacebookAPI:
                         except Exception:
                             pass
                         
-                        if fb_id:
-                            try:
-                                await crawl_post_comments(pid, fb_id, client_cookie=cookie)
-                            except Exception as e:
-                                logger.error(f"Bulk crawl error for {pid}: {e}")
+                        if not fb_id:
+                            import base64
+                            fb_id = base64.b64encode(f"feedback:{pid}".encode()).decode()
+                        
+                        try:
+                            await crawl_post_comments(pid, fb_id, client_cookie=cookie)
+                            # Wait until this post finishes or timeout 60s
+                            from proxify.platforms.facebook.crawler import get_comment_progress
+                            for _ in range(60):
+                                prog = get_comment_progress(pid)
+                                if prog and prog.get("status") in ["done", "error"]:
+                                    break
+                                await asyncio.sleep(1)
+                        except Exception as e:
+                            logger.error(f"Bulk crawl error for {pid}: {e}")
                         await asyncio.sleep(2)  # Rate limit between posts
                     
                     self._bulk_progress[task_id] = {
@@ -757,44 +809,48 @@ class FacebookAPI:
             fb_dtsg = data.get("fb_dtsg", "").strip()
             lsd = data.get("lsd", "").strip()
             
-            import json
-            logger.info(f"[Extension] FULL DATA DUMP: {json.dumps(data)}")
-            
-            logger.info(f"[Extension] Received cookie len={len(cookie_str)}, UA={bool(user_agent)}, fb_dtsg={bool(fb_dtsg)} ({fb_dtsg[:10]}), lsd={bool(lsd)} ({lsd[:10]})")
-            
-            from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+            from proxify.platforms.facebook.auth import IN_MEMORY_TEMPLATES
             
             feed_template = data.get("feed_template")
             tpl_cookie = ""
             if "feed_template" in data:
                 # 1. Capture cookie string from headers
                 tpl_cookie = data["feed_template"]["headers"].get("cookie", "") or data["feed_template"]["headers"].get("Cookie", "")
-                logger.info(f"[Extension] Extracted template cookie len={len(tpl_cookie)}, has_xs={'xs=' in tpl_cookie}")
                 
                 friendly_name = data.get("friendly_name", "Unknown")
-                logger.info(f"[Extension] Received GraphQL template for {friendly_name}")
                 feed_template = data["feed_template"]
                 
-                if "Comment" in friendly_name:
-                    IN_MEMORY_TEMPLATES["comment"] = feed_template
-                    logger.info(f"[Extension] Saved Comment template: {friendly_name}")
-                elif "Pagination" in friendly_name or "Reply" in friendly_name:
+                if "Depth" in friendly_name or "Reply" in friendly_name:
                     IN_MEMORY_TEMPLATES["reply"] = feed_template
-                    logger.info(f"[Extension] Saved Reply template: {friendly_name}")
+                    logger.debug(f"[Extension] Saved Reply template: {friendly_name}")
+                elif "Comment" in friendly_name or "UFI" in friendly_name:
+                    IN_MEMORY_TEMPLATES["comment"] = feed_template
+                    logger.debug(f"[Extension] Saved Comment template: {friendly_name}")
                 else:
-                    # Fallback save as feed if we can't determine
                     IN_MEMORY_TEMPLATES["feed"] = feed_template
-                    logger.info(f"[Extension] Fallback saved as Feed template: {friendly_name}")
+                    logger.debug(f"[Extension] Saved Feed template: {friendly_name}")
 
-            user_agent = data.get("user_agent", "").strip()
+                if tpl_cookie:
+                    current_cookie = IN_MEMORY_COOKIES.get("cookie", "")
+                    if "xs=" in tpl_cookie and "xs=" not in current_cookie:
+                        import re
+                        xs_match = re.search(r'xs=([^;]+)', tpl_cookie)
+                        if xs_match and current_cookie:
+                            IN_MEMORY_COOKIES["cookie"] = f"{current_cookie}; xs={xs_match.group(1)}"
+                            logger.debug("[Extension] Merged missing xs cookie into in-memory cookies from template!")
+                        else:
+                            IN_MEMORY_COOKIES["cookie"] = tpl_cookie
+                    elif not current_cookie:
+                        IN_MEMORY_COOKIES["cookie"] = tpl_cookie
+
             fb_dtsg = data.get("fb_dtsg", "").strip()
             lsd = data.get("lsd", "").strip()
             sd = data.get("sd", None)
+            cookie_names = data.get("cookie_names", [])
             
-            # If popup sends cookie, log it; otherwise log template cookie status
             cookie_str = data.get("cookie", "").strip()
             log_cookie = cookie_str if cookie_str else tpl_cookie
-            logger.info(f"[Extension] Received cookie len={len(log_cookie)}, UA={bool(user_agent)}, fb_dtsg={bool(fb_dtsg)} ({fb_dtsg[:10]}), lsd={bool(lsd)} ({lsd[:10]})")
+            logger.debug(f"[Extension] Received cookie len={len(log_cookie)}, UA={bool(user_agent)}, fb_dtsg={bool(fb_dtsg)}, lsd={bool(lsd)}")
             
             if not cookie_str and not feed_template:
                 return web.json_response({"status": "error", "message": "No cookie or template provided"}, status=400)
@@ -805,9 +861,22 @@ class FacebookAPI:
                 if cookie_str and "c_user=" not in cookie_str:
                     cookie_str = f"c_user={user_id}; {cookie_str}"
 
-            # Store in RAM only
             if cookie_str:
+                if "xs=" not in cookie_str and "xs=" in IN_MEMORY_COOKIES.get("cookie", ""):
+                    import re
+                    xs_match = re.search(r'xs=([^;]+)', IN_MEMORY_COOKIES["cookie"])
+                    if xs_match:
+                        cookie_str = f"{cookie_str}; xs={xs_match.group(1)}"
+                        logger.info("[Extension] Preserved existing xs cookie in merged cookie string")
+
                 IN_MEMORY_COOKIES["cookie"] = cookie_str
+                try:
+                    from proxify.platforms.facebook.database import fb_db
+                    fb_db.config.set("fb_cookie", cookie_str)
+                    if user_id:
+                        fb_db.config.set("fb_user_id", user_id)
+                except Exception as e:
+                    logger.debug(f"[Extension] Error persisting cookie to config: {e}")
             if user_agent:
                 IN_MEMORY_COOKIES["user_agent"] = user_agent
             if fb_dtsg:
@@ -817,17 +886,29 @@ class FacebookAPI:
             if sd:
                 IN_MEMORY_COOKIES["sd"] = sd
                 
-            # Quick validation: check for key auth cookies
-            has_c_user = "c_user=" in cookie_str or bool(user_id)
-            has_xs = "xs=" in cookie_str
-            if has_c_user and (has_xs or bool(fb_dtsg)):
-                msg = f"✅ Cookie & Token đã lưu ({len(cookie_str)} ký tự). Sẵn sàng crawl!"
+            final_cookie = IN_MEMORY_COOKIES.get("cookie", "")
+            has_c_user = "c_user=" in final_cookie or bool(user_id)
+            has_xs = "xs=" in final_cookie
+            
+            if has_c_user and has_xs and bool(fb_dtsg):
+                msg = f"✅ Đồng bộ HOÀN HẢO (Đủ UID, xs, fb_dtsg). Sẵn sàng crawl!"
+            elif has_c_user and bool(fb_dtsg):
+                msg = f"⚠️ Đã lưu UID & fb_dtsg (Chưa có cookie xs). Hệ thống sẽ dùng Extension Tab để xác thực."
             elif cookie_str:
                 msg = f"✅ Cookie đã lưu ({len(cookie_str)} ký tự)."
             else:
                 msg = f"✅ Đã lưu template {friendly_name} từ extension."
                 
-            return web.json_response({"status": "ok", "message": msg})
+            # Dữ liệu chỉ lưu trong RAM (IN_MEMORY_COOKIES / IN_MEMORY_TEMPLATES)
+            # Tuyệt đối không lưu ra file đĩa hay database.
+                
+            return web.json_response({
+                "status": "ok", 
+                "message": msg,
+                "has_xs": has_xs,
+                "has_c_user": has_c_user,
+                "has_dtsg": bool(fb_dtsg)
+            })
         except Exception as e:
             logger.error(f"Error saving cookie: {e}")
             return web.json_response({"status": "error", "message": str(e)}, status=500)
@@ -836,9 +917,6 @@ class FacebookAPI:
         """Get the saved cookie string from memory."""
         try:
             cookie_str = IN_MEMORY_COOKIES.get("cookie", "")
-            logging.info("=================================================")
-            logging.info(cookie_str)
-            logging.info("=================================================")
             return web.json_response({"status": "ok", "cookie": cookie_str})
         except Exception as e:
             return web.json_response({"status": "error", "message": str(e)}, status=500)

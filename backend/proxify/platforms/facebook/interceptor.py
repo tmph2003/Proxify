@@ -15,7 +15,7 @@ class FacebookGraphQLObserver(IObserverInterceptor):
     """
     target_domains = {"facebook.com", "fbcdn.net"}
     
-    def __init__(self, event_bus: AsyncEventBus):
+    def __init__(self, event_bus: AsyncEventBus = None):
         self.event_bus = event_bus
 
     async def handle_request(self, flow: http.HTTPFlow) -> None:
@@ -57,28 +57,17 @@ class FacebookGraphQLObserver(IObserverInterceptor):
                 "form_data": form_data
             }
             # Publish to EventBus for background processing instead of parsing JSON synchronously
-            self.event_bus.publish("facebook.graphql.request", payload)
+            if self.event_bus:
+                self.event_bus.publish("facebook.graphql.request", payload)
 
     async def handle_response(self, flow: http.HTTPFlow) -> None:
         """Capture GraphQL responses and detect inactive posts."""
         path = flow.request.path
         
-        # 1. Capture GraphQL Responses for offline normalization
-        if "/api/graphql" in path:
-            if not flow.request.urlencoded_form:
-                return
-            form_data = dict(flow.request.urlencoded_form)
-            if "fb_dtsg" in form_data:
-                friendly_name = form_data.get("fb_api_req_friendly_name", "unknown")
-                body = flow.response.get_text(strict=False)
-                if body:
-                    payload = {
-                        "friendly_name": friendly_name,
-                        "url": flow.request.url,
-                        "raw_json": body
-                    }
-                    self.event_bus.publish("facebook.graphql.response", payload)
-                    return
+        # 1. Capture GraphQL Responses (DISABLED)
+        # Passive ingestion disabled: Chỉ lưu bài viết khi người dùng chủ động cào qua Dashboard/Crawler.
+        # Tránh việc người dùng lướt Newsfeed, Reels hoặc nhóm khác bị tự động lưu bài lạ vào DB.
+        pass
         
         # 2. Detect inactive posts
         if flow.request.method == "GET" and "/groups/" in path and "/posts/" in path:
@@ -90,4 +79,5 @@ class FacebookGraphQLObserver(IObserverInterceptor):
                     "path": flow.request.path,
                     "is_active": False
                 }
-                self.event_bus.publish("facebook.post.status", payload)
+                if self.event_bus:
+                    self.event_bus.publish("facebook.post.status", payload)

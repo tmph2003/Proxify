@@ -8,10 +8,19 @@
     "activeTab",
     "scripting",
     "tabs",
-    "webRequest"
+    "webRequest",
+    "webRequestExtraHeaders",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.facebook.com/*", "*://facebook.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
   ],
   "background": {
     "service_worker": "background.js"

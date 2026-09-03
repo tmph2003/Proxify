@@ -17,10 +17,17 @@ class ProxyRouter:
     O(depth) Radix Trie Router for matching domains (including wildcards/subdomains).
     Domains are inserted in reverse order (e.g., com -> facebook -> api).
     """
-    def __init__(self):
+    def __init__(self, ignored_hosts: Optional[List[str]] = None):
         self.root = TrieNode()
         self.global_observers: List[IObserverInterceptor] = []
         self.global_mutators: List[IMutatorInterceptor] = []
+        self.ignored_hosts: List[str] = [h.strip().lower() for h in (ignored_hosts or []) if h.strip()]
+
+    def is_ignored(self, host: str) -> bool:
+        if not host or not self.ignored_hosts:
+            return False
+        host_lower = host.lower()
+        return any(h in host_lower for h in self.ignored_hosts)
 
     def _insert(self, domain: str, interceptor, is_mutator: bool):
         if not domain:
@@ -76,6 +83,8 @@ class ProxyRouter:
     async def route_request(self, flow: http.HTTPFlow) -> None:
         """Route request to appropriate interceptors."""
         host = flow.request.pretty_host
+        if self.is_ignored(host):
+            return
         observers, mutators = self._search(host)
         
         # 1. Fire and forget observers
@@ -104,6 +113,8 @@ class ProxyRouter:
             return
 
         host = flow.request.pretty_host
+        if self.is_ignored(host):
+            return
         observers, mutators = self._search(host)
         
         for obs in observers:
@@ -117,6 +128,8 @@ class ProxyRouter:
     async def route_response(self, flow: http.HTTPFlow) -> None:
         """Route response to appropriate interceptors."""
         host = flow.request.pretty_host
+        if self.is_ignored(host):
+            return
         observers, mutators = self._search(host)
         
         for obs in observers:

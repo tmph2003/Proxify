@@ -625,7 +625,7 @@
             <div id="dbDomainDropdown" style="display: none; position: absolute; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 8px; z-index: 100; min-width: 250px; max-height: 350px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
             </div>
         </div>
-        <button class="filter-btn" id="dbToggleBtn" onclick="toggleDbIntegration()">🔴 Ghi DB: TẮT</button>
+        <button class="filter-btn active" id="dbToggleBtn" onclick="toggleDbIntegration()" style="border-color: var(--green); color: var(--green); background: rgba(34, 197, 94, 0.1);">🟢 Ghi DB: BẬT</button>
         <button class="filter-btn" id="gqlFilter" onclick="toggleGqlFilter()">GraphQL</button>
         <button class="filter-btn" id="autoScrollBtn" onclick="toggleAutoScroll()">⬇ Auto-scroll</button>
     </div>
@@ -693,7 +693,7 @@ let gqlOnly = false;
 let ws = null;
 let reconnectTimer = null;
 let currentTab = 'overview';
-let dbIntegrationEnabled = false;
+let dbIntegrationEnabled = true;
 let dbAllowedDomains = [];
 let savedListWidth = '500px'; // default width
 

@@ -40,3 +40,6 @@ GEMINI.md
 
 scratchs/
 zalo_browser_data/
+
+# Git Worktrees
+.worktrees/

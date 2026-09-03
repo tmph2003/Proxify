@@ -8,7 +8,7 @@ from proxify.database import pool as shared_pool
 from .repository import RequestRepository
 from .workers import TTLWorker, AsyncWriterWorker
 
-logger = logging.getLogger("proxify.storage")
+logger = logging.getLogger("proxify.core.traffic_storage")
 
 _COMMIT_BATCH_SIZE = int(os.getenv("COMMIT_BATCH_SIZE", "50"))
 DB_DSN = os.getenv("DB_DSN", "postgresql://proxify_user:proxify_pass@localhost:5432/proxify_db")
@@ -19,7 +19,7 @@ class RequestStorage:
 
     def __init__(self, db_dsn: str = DB_DSN):
         self.db_dsn = db_dsn
-        self.db_integration_enabled = os.getenv("DB_INTEGRATION_ENABLED", "false").lower() == "true"
+        self.db_integration_enabled = os.getenv("DB_INTEGRATION_ENABLED", "true").lower() == "true"
         self.db_allowed_domains = []
         
         self._pool = shared_pool

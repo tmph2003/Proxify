@@ -3,7 +3,7 @@ import logging
 from typing import Any, Optional
 from psycopg2.extras import execute_values
 
-logger = logging.getLogger("proxify.storage.repository")
+logger = logging.getLogger("proxify.core.traffic_storage.repository")
 
 class RequestRepository:
     """Handles all PostgreSQL queries for captured HTTP requests."""

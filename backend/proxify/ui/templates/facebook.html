@@ -1573,10 +1573,12 @@
                         setFeedCrawlingState(false);
                     }
                     
-                    // Toast notification for crawled posts
+                    // Toast notification for crawled posts & status alerts
                     if (groupObj && groupObj.updated_at && groupObj.updated_at !== window._lastToastTime) {
                         window._lastToastTime = groupObj.updated_at;
-                        if ((groupObj.last_p_count || 0) > 0 || (groupObj.last_c_count || 0) > 0) {
+                        if (groupObj.toast_message) {
+                            showToast(groupObj.toast_message, groupObj.toast_icon || '⚠️');
+                        } else if ((groupObj.last_p_count || 0) > 0 || (groupObj.last_c_count || 0) > 0) {
                             showToast(`Đã thu thập <b>${groupObj.last_p_count}</b> bài viết và <b>${groupObj.last_c_count}</b> bình luận mới.`, '🚀');
                         }
                     }

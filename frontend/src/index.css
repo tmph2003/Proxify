@@ -1603,6 +1603,17 @@ body {
             opacity: 0.8;
         }
 
+        .btn-comment:disabled,
+        .btn-comment.disabled {
+            opacity: 0.25 !important;
+            cursor: not-allowed !important;
+            pointer-events: none !important;
+            filter: grayscale(100%) !important;
+            border-color: rgba(255, 255, 255, 0.05) !important;
+            background: rgba(255, 255, 255, 0.02) !important;
+            color: var(--text-muted) !important;
+        }
+
         .btn-crawl-sm {
             background: var(--accent);
             color: white;

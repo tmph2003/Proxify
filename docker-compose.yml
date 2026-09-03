@@ -16,8 +16,9 @@ services:
       - COMMIT_INTERVAL=2.0
       - DUMP_DIR=dumps
       - SPOOF_DOMAINS=${SPOOF_DOMAINS:-tiktok.com,tiktokv.com,byteoversea.com,tiktokcdn.com,zalo.me,chat.zalo.me,zalo.vn,zalopay.vn,zaloapp.com}
-      - IGNORE_HOSTS=${IGNORE_HOSTS:-captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com}
+      - IGNORE_HOSTS=${IGNORE_HOSTS:-trino.sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com}
       - DB_DSN=postgresql://proxify_user:proxify_pass@db:5432/proxify_db
+      - DB_INTEGRATION_ENABLED=true
     command: ["python", "-m", "proxify"]
     depends_on:
       db:

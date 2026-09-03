@@ -63,15 +63,14 @@ HEADERS_TO_STRIP = frozenset([
     "accept-encoding",
     "connection",
     "transfer-encoding",
-    # HTTP/2 pseudo-headers (mitmproxy preserves these)
     ":authority",
     ":method",
     ":path",
     ":scheme",
-    # ─── Anti-detection: headers curl_cffi auto-generates correctly ──────
-    # These are set by the impersonate engine based on the target browser.
-    # Manually setting them (especially with HeadlessChrome values from
-    # Playwright) is the #1 cause of bot detection.
+])
+
+# Headers that curl_cffi auto-generates or Facebook automation markers
+BROWSER_HINT_HEADERS = frozenset([
     "sec-ch-ua",
     "sec-ch-ua-full-version-list",
     "sec-ch-ua-mobile",
@@ -79,53 +78,58 @@ HEADERS_TO_STRIP = frozenset([
     "sec-ch-ua-platform",
     "sec-ch-ua-platform-version",
     "sec-ch-prefers-color-scheme",
-    # ─── Anti-detection: metadata headers that reveal automation ─────────
-    "x-fb-friendly-name",   # Reveals exact GraphQL query name
-    "x-asbd-id",            # Internal tracking ID
-    "x-fb-lsd",             # Redundant — already in form_data as 'lsd'
+    "x-fb-friendly-name",
+    "x-asbd-id",
+    "x-fb-lsd",
 ])
 
 
-def sanitize_headers(raw_headers: dict) -> dict:
+def sanitize_headers(raw_headers: dict, strip_browser_hints: bool = False) -> dict:
     """Strip headers that curl_cffi should auto-generate for consistency.
 
-    Removes pseudo-headers, hop-by-hop headers, sec-ch-ua* headers
-    (which may contain HeadlessChrome fingerprint from Playwright),
-    and automation-revealing metadata headers.
+    Removes pseudo-headers, hop-by-hop headers, and optionally sec-ch-ua* headers.
     """
     cleaned = {}
     for k, v in raw_headers.items():
         k_lower = k.lower()
         if k_lower in HEADERS_TO_STRIP:
             continue
-        # Don't include headers that start with ':'
         if k_lower.startswith(":"):
+            continue
+        if strip_browser_hints and k_lower in BROWSER_HINT_HEADERS:
+            continue
+        if "headlesschrome" in str(v).lower():
             continue
         cleaned[k] = v
     return cleaned
 
 
-def is_soft_blocked(status_code: int, content: bytes, headers: dict, url: str = "") -> bool:
+def is_soft_blocked(status_code: int, content: bytes, headers: dict = None, url: str = "") -> bool:
     """Detect if a response is a soft block (200 OK but actually a challenge page).
 
     Many anti-bot systems return HTTP 200 with a challenge page instead of
     a traditional 403/429 to avoid detection by simple status code checks.
     """
+    if headers is None:
+        headers = {}
+
     # Skip checking static assets from CDNs
     if "fbcdn.net" in url:
         return False
+
     # Check for Cloudflare challenge header
     cf_mitigated = headers.get("cf-mitigated", "")
     if "challenge" in cf_mitigated.lower():
         return True
 
     # Check for challenge page content
-    # Only check HTML or JSON responses (skip JS/CSS static assets)
+    # Only check HTML or JSON responses (or when content-type is omitted in mock/test responses)
     content_type = headers.get("content-type", "").lower()
     if content and len(content) < 50000:  # Only check small responses
-        if "text/html" in content_type or "application/json" in content_type:
+        if not content_type or "text/html" in content_type or "application/json" in content_type or status_code in (403, 429):
+            content_lower = content.lower()
             for sig in SOFT_BLOCK_SIGNATURES:
-                if sig in content:
+                if sig.lower() in content_lower:
                     return True
 
     return False

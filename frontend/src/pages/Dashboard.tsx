@@ -13,7 +13,7 @@ export const DashboardPage: React.FC = () => {
     const [domainFilter, setDomainFilter] = useState(() => sessionStorage.getItem('domainFilter') || '');
     const [gqlFilter, setGqlFilter] = useState(() => sessionStorage.getItem('gqlFilter') === 'true');
     const [autoScroll, setAutoScroll] = useState(() => sessionStorage.getItem('autoScroll') !== 'false');
-    const [dbIntegrationEnabled, setDbIntegrationEnabled] = useState(() => sessionStorage.getItem('dbIntegrationEnabled') === 'true');
+    const [dbIntegrationEnabled, setDbIntegrationEnabled] = useState(() => sessionStorage.getItem('dbIntegrationEnabled') !== 'false');
     const [domains, setDomains] = useState<any[]>([]);
     const [showDbDomainDropdown, setShowDbDomainDropdown] = useState(false);
     const [dbAllowedDomains, setDbAllowedDomains] = useState<string[]>([]);

@@ -66,7 +66,8 @@ class BackgroundWorker:
                     if record['topic'] == 'facebook.graphql.request':
                         await self._handle_fb_graphql(payload)
                     elif record['topic'] == 'facebook.graphql.response':
-                        await self._handle_fb_graphql_response(payload)
+                        # Passive ingestion disabled: chỉ bóc tách khi chủ động crawl
+                        pass
                     elif record['topic'] == 'facebook.post.status':
                         await self._handle_fb_status(conn, payload)
                         
@@ -114,7 +115,7 @@ class BackgroundWorker:
             return
             
         try:
-            from proxify.platforms.facebook.token_store import IN_MEMORY_TEMPLATES
+            from proxify.platforms.facebook.auth import IN_MEMORY_TEMPLATES
             
             tokens = {
                 "headers": payload.get("headers", {}),

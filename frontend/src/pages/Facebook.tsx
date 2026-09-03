@@ -10,20 +10,52 @@ export const FacebookPage: React.FC = () => {
         statusFilter, setStatusFilter,
         selectedPosts, toggleSelection, toggleSelectAll,
         bulkRefresh, bulkCheckStatus, bulkCrawlComments, bulkExportCsv, bulkDelete,
-        fetchComments, startDateFilter, setStartDateFilter, endDateFilter, setEndDateFilter } = useFacebook();
+        fetchComments, startDateFilter, setStartDateFilter, endDateFilter, setEndDateFilter,
+        crawlPostComments, stopCommentCrawl, commentCrawlProgress, isCommentCrawling } = useFacebook();
 
     const [groupId, setGroupId] = useState(localStorage.getItem('fb_groupId') || '');
-            const [cookieExpanded, Expanded] = useState(false);
+    const [cookieExpanded, setCookieExpanded] = useState(false);
     const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
     const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
     const [groupSearch, setGroupSearch] = useState('');
-    const [cookieInput, Input] = useState(cookie);
+    const [cookieInput, setCookieInput] = useState(cookie);
     const [fbDtsgInput, setFbDtsgInput] = useState(localStorage.getItem('fb_dtsg') || '');
 
-    // Comment Modal
-    const [modalOpen, setModalOpen] = useState(false);
+    // Comment Modal (Lưu theo Session)
+    const [modalOpen, setModalOpen] = useState(() => sessionStorage.getItem('fb_modal_open') === 'true');
+    const [selectedPost, setSelectedPost] = useState<any>(() => {
+        try {
+            return JSON.parse(sessionStorage.getItem('fb_selected_post') || 'null');
+        } catch (e) {
+            return null;
+        }
+    });
     const [comments, setComments] = useState<any[]>([]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    // Khôi phục bình luận modal nếu refresh trang khi đang xem và cập nhật live khi đang cào
+    React.useEffect(() => {
+        if (!modalOpen || !selectedPost) return;
+        const pid = selectedPost.post_id || selectedPost.id;
+        fetchComments(pid).then(res => {
+            if (res && (res.status === 'ok' || res.success)) {
+                setComments(res.data || []);
+            }
+        });
+
+        const isCrawling = commentCrawlProgress[pid]?.status === 'running';
+        if (!isCrawling) return;
+
+        const interval = setInterval(() => {
+            fetchComments(pid).then(res => {
+                if (res && (res.status === 'ok' || res.success)) {
+                    setComments(res.data || []);
+                }
+            });
+        }, 2000);
+
+        return () => clearInterval(interval);
+    }, [modalOpen, selectedPost, commentCrawlProgress]);
 
     const handleSaveCookie = () => {
         saveCookie(cookieInput, fbDtsgInput);
@@ -52,13 +84,32 @@ export const FacebookPage: React.FC = () => {
     };
 
     const openComments = async (post: any) => {
-        
+        setSelectedPost(post);
         setModalOpen(true);
-        const data = await fetchComments(post.post_id);
-        if (data && data.status === 'ok') {
-            setComments(data.data || []);
+        sessionStorage.setItem('fb_modal_open', 'true');
+        sessionStorage.setItem('fb_selected_post', JSON.stringify(post));
+        const pid = post.post_id || post.id;
+        const res = await fetchComments(pid);
+        if (res && (res.status === 'ok' || res.success)) {
+            setComments(res.data || []);
         } else {
             setComments([]);
+        }
+    };
+
+    const closeComments = () => {
+        setModalOpen(false);
+        setSelectedPost(null);
+        sessionStorage.removeItem('fb_modal_open');
+        sessionStorage.removeItem('fb_selected_post');
+    };
+
+    const handleStartCrawlComments = async (post: any) => {
+        if (!post) return;
+        const pid = post.post_id || post.id;
+        const res: any = await crawlPostComments(pid, post.feedback_id);
+        if (res && (res.status === 'ok' || res.success)) {
+            setComments(res.data || []);
         }
     };
 
@@ -81,7 +132,7 @@ export const FacebookPage: React.FC = () => {
                 {/* Cookie Section */}
                 <div style={{ marginBottom: '20px', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
                     <div 
-                        onClick={() => Expanded(!cookieExpanded)}
+                        onClick={() => setCookieExpanded(!cookieExpanded)}
                         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', background: 'var(--bg-tertiary)', transition: 'all 0.2s' }}
                     >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -105,7 +156,7 @@ export const FacebookPage: React.FC = () => {
                             </div>
                             <textarea 
                                 value={cookieInput}
-                                onChange={(e) => Input(e.target.value)}
+                                onChange={(e) => setCookieInput(e.target.value)}
                                 placeholder={"Paste cookie string ở đây...\nVí dụ: c_user=123456; xs=abc123; fr=xyz..."}
                                 style={{ width: '100%', height: '80px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text-primary)', padding: '10px', fontSize: '12px', fontFamily: "'JetBrains Mono', monospace", resize: 'vertical', boxSizing: 'border-box' }}
                             />
@@ -133,7 +184,7 @@ export const FacebookPage: React.FC = () => {
                 <div className="form-grid">
                     <div className="form-group full-width">
                         <label>Group ID</label>
-                        <input type="text" value={groupId} onChange={e => setGroupId(e.target.value)} placeholder="Ví dụ: 1234567890" />
+                        <input type="text" value={groupId} onChange={e => { setGroupId(e.target.value); localStorage.setItem('fb_groupId', e.target.value); }} placeholder="Ví dụ: 1234567890" />
                     </div>
                     <div className="form-group">
                         <label>Từ ngày</label>
@@ -145,7 +196,19 @@ export const FacebookPage: React.FC = () => {
                     </div>
                     <div className="form-group full-width" style={{ marginTop: '8px' }}>
                         {!crawling ? (
-                            <button className="btn-crawl" style={{ width: '100%' }} onClick={handleStartCrawl}>Bắt đầu thu thập</button>
+                            <button 
+                                className="btn-crawl" 
+                                style={{ 
+                                    width: '100%',
+                                    opacity: isCommentCrawling ? 0.5 : 1,
+                                    cursor: isCommentCrawling ? 'not-allowed' : 'pointer'
+                                }} 
+                                disabled={isCommentCrawling}
+                                title={isCommentCrawling ? "⚠️ Đang có tiến trình cào bình luận (Comment) đang chạy. Không thể cào bài viết lúc này." : ""}
+                                onClick={handleStartCrawl}
+                            >
+                                {isCommentCrawling ? "⏳ Đang cào bình luận..." : "Bắt đầu thu thập"}
+                            </button>
                         ) : (
                             <button className="btn-stop" style={{ width: '100%' }} onClick={stopCrawl}>🛑 Dừng thu thập</button>
                         )}
@@ -288,20 +351,81 @@ export const FacebookPage: React.FC = () => {
                                                     <div style={{ marginBottom: '4px' }}>👍 {post.reaction_count || 0}</div>
                                                 </td>
                                                 <td style={{ padding: '16px 24px', verticalAlign: 'top' }}>
-                                                    {crawled > 0 ? (
-                                                        <button className="btn-comment has-data" disabled={feedCrawling} style={{ opacity: feedCrawling ? 0.5 : 1 }} onClick={() => openComments(post)}>
-                                                            💬 {crawled} / {cc} đã lấy
-                                                        </button>
-                                                    ) : cc > 0 ? (
-                                                        <>
-                                                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{cc} bình luận</div>
-                                                            <button className="btn-comment" disabled={feedCrawling} style={{ opacity: feedCrawling ? 0.5 : 1 }} onClick={() => openComments(post)}>
-                                                                ⬇️ Lấy bình luận
-                                                            </button>
-                                                        </>
-                                                    ) : (
-                                                        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>0 bình luận</span>
-                                                    )}
+                                                    {(() => {
+                                                        const isCrawlingThis = commentCrawlProgress[postId]?.status === 'running';
+                                                        if (isCrawlingThis) {
+                                                            return (
+                                                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                                                    <button 
+                                                                        className="btn-comment crawling" 
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            stopCommentCrawl(postId);
+                                                                        }}
+                                                                        style={{ 
+                                                                            cursor: 'pointer',
+                                                                            background: 'rgba(239, 68, 68, 0.15)',
+                                                                            borderColor: 'rgba(239, 68, 68, 0.4)',
+                                                                            color: '#ef4444',
+                                                                            fontWeight: 600
+                                                                        }}
+                                                                        title="Nhấn vào đây để DỪNG lấy bình luận"
+                                                                    >
+                                                                        <span className="spinner-sm" style={{ marginRight: '6px', borderColor: '#ef4444', borderTopColor: 'transparent' }}></span>
+                                                                        <span>🛑 Dừng ({commentCrawlProgress[postId]?.total || crawled || 0})</span>
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => openComments(post)}
+                                                                        style={{
+                                                                            background: 'var(--bg-tertiary)',
+                                                                            border: '1px solid var(--border)',
+                                                                            borderRadius: '4px',
+                                                                            padding: '4px 8px',
+                                                                            cursor: 'pointer',
+                                                                            fontSize: '12px'
+                                                                        }}
+                                                                        title="Xem bình luận trong popup"
+                                                                    >
+                                                                        👁️
+                                                                    </button>
+                                                                </div>
+                                                            );
+                                                        }
+
+                                                        if (crawled > 0) {
+                                                            return (
+                                                                <button 
+                                                                    className="btn-comment has-data"
+                                                                    onClick={() => openComments(post)}
+                                                                    style={{ cursor: 'pointer' }}
+                                                                    title="Nhấn để xem danh sách bình luận đã lưu"
+                                                                >
+                                                                    💬 {crawled} / {cc} đã lấy
+                                                                </button>
+                                                            );
+                                                        }
+                                                        if (cc > 0) {
+                                                            const isCommentActionBlocked = crawling || feedCrawling;
+                                                            return (
+                                                                <>
+                                                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{cc} bình luận</div>
+                                                                    <button 
+                                                                        className={`btn-comment ${isCommentActionBlocked ? 'disabled' : ''}`}
+                                                                        disabled={isCommentActionBlocked} 
+                                                                        style={isCommentActionBlocked ? { 
+                                                                            opacity: 0.5, 
+                                                                            cursor: 'not-allowed'
+                                                                        } : { cursor: 'pointer' }} 
+                                                                        title={isCommentActionBlocked ? "⚠️ Đang cào bài viết (Post), tạm thời không thể lấy bình luận" : "Nhấn để mở và lấy bình luận"}
+                                                                        onClick={() => !isCommentActionBlocked && openComments(post)}
+                                                                    >
+                                                                        ⬇️ Lấy bình luận
+                                                                    </button>
+                                                                </>
+                                                            );
+                                                        }
+                                                        return <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>0 bình luận</span>;
+                                                    })()}
                                                 </td>
                                             </tr>
                                         );
@@ -316,9 +440,9 @@ export const FacebookPage: React.FC = () => {
                                 Tổng: <b style={{ color: 'var(--text-primary)' }}>{total}</b> bài viết
                             </div>
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '4px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', opacity: page <= 1 ? 0.5 : 1 }}>&lt; Trước</button>
+                                <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '4px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', opacity: page <= 1 ? 0.5 : 1 }}>&lt; Trước</button>
                                 <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>Trang <b>{page}</b> / <b>{totalPages}</b></span>
-                                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '4px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', opacity: page >= totalPages ? 0.5 : 1 }}>Sau &gt;</button>
+                                <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '4px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', opacity: page >= totalPages ? 0.5 : 1 }}>Sau &gt;</button>
                                 <select value={limit} onChange={e => setLimit(Number(e.target.value))} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '4px 8px', borderRadius: '6px', fontSize: '13px', outline: 'none', marginLeft: '16px' }}>
                                     <option value="10">10 / trang</option>
                                     <option value="20">20 / trang</option>
@@ -334,43 +458,212 @@ export const FacebookPage: React.FC = () => {
                     <span className="fab-count">✅ {selectedPosts.size} bài đã chọn</span>
                     <button className="fab-btn" onClick={bulkRefresh}>🔄 Làm mới</button>
                     <button className="fab-btn" onClick={bulkCheckStatus}>🔍 Kiểm tra</button>
-                    <button className="fab-btn primary" onClick={bulkCrawlComments}>💬 Cào BL</button>
+                    <button 
+                        className="fab-btn primary" 
+                        disabled={crawling}
+                        title={crawling ? "⚠️ Đang có tiến trình cào bài viết (Post) đang chạy. Không thể cào bình luận cùng lúc." : ""}
+                        style={{ opacity: crawling ? 0.5 : 1, cursor: crawling ? 'not-allowed' : 'pointer' }}
+                        onClick={bulkCrawlComments}
+                    >
+                        💬 Cào BL
+                    </button>
                     <button className="fab-btn" onClick={bulkExportCsv}>📥 CSV</button>
                     <button className="fab-btn danger" onClick={bulkDelete}>🗑️ Xóa</button>
                 </div>
             </div>
 
             {/* Comment Modal */}
-            {modalOpen && (
-                <div className="modal-overlay active" onClick={(e) => { if (e.target === e.currentTarget) setModalOpen(false); }}>
-                    <div className="modal-content">
-                        <div className="modal-header">
-                            <h3>Bình luận</h3>
-                            <button className="modal-close" onClick={() => setModalOpen(false)}>✕</button>
-                        </div>
-                        <div className="modal-body">
-                            {comments.length === 0 ? (
-                                <div className="comment-empty">
-                                    <div className="icon">💬</div>
-                                    <p>Chưa có bình luận nào được tải về cho bài viết này.</p>
+            {modalOpen && selectedPost && (
+                <div className="modal-overlay active" onClick={(e) => { 
+                    const pid = selectedPost.post_id || selectedPost.id;
+                    const isCrawling = commentCrawlProgress[pid]?.status === 'running';
+                    if (e.target === e.currentTarget && !isCrawling) closeComments(); 
+                }}>
+                    <div className="modal-content" style={{ maxWidth: '640px', width: '90%' }}>
+                        <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '16px' }}>💬 Bình luận bài viết</h3>
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                    Tác giả: <b style={{ color: 'var(--accent)' }}>{selectedPost.author_name || 'Ẩn danh'}</b>
+                                    {selectedPost.comment_count > 0 && ` • Tổng FB: ${selectedPost.comment_count}`}
+                                    {comments.length > 0 && ` • Đã lưu: ${comments.length}`}
                                 </div>
-                            ) : (
-                                comments.map((c, idx) => (
-                                    <div key={idx} className="comment-item">
-                                        <div className="c-header">
-                                            <div className="c-avatar">
-                                                {c.author_avatar && <img src={c.author_avatar} referrerPolicy="no-referrer" />}
-                                            </div>
-                                            <div className="c-name">{c.author_name}</div>
-                                            <div className="c-time">{c.creation_datetime ? new Date(c.creation_datetime).toLocaleString('vi-VN') : ''}</div>
-                                        </div>
-                                        <div className="c-body">{c.message_text}</div>
-                                    </div>
-                                ))
-                            )}
+                            </div>
+                            <button 
+                                className="modal-close" 
+                                onClick={closeComments} 
+                            >
+                                ✕
+                            </button>
                         </div>
-                        <div className="modal-footer">
-                            <button className="btn-crawl-sm" onClick={() => setModalOpen(false)}>Đóng</button>
+                        <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                            {(() => {
+                                const pid = selectedPost.post_id || selectedPost.id;
+                                const crawlInfo = commentCrawlProgress[pid];
+                                const isCrawling = crawlInfo?.status === 'running' || crawlInfo?.status === 'queued';
+
+                                if (comments.length === 0) {
+                                    return (
+                                        <div className="comment-empty">
+                                            <div className="icon">💬</div>
+                                            <p style={{ marginBottom: '16px' }}>Chưa có bình luận nào được tải về cho bài viết này.</p>
+                                            {isCrawling ? (
+                                                <button 
+                                                    className="btn-crawl-sm danger" 
+                                                    onClick={() => stopCommentCrawl(pid)}
+                                                    style={{ 
+                                                        padding: '8px 20px', 
+                                                        fontSize: '13px', 
+                                                        display: 'inline-flex', 
+                                                        alignItems: 'center', 
+                                                        gap: '8px', 
+                                                        margin: '0 auto',
+                                                        background: '#ef4444',
+                                                        color: '#fff',
+                                                        border: 'none',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                    title="Nhấn vào đây để DỪNG cào bình luận"
+                                                >
+                                                    <span className="spinner-sm" style={{ borderColor: '#fff', borderTopColor: 'transparent' }}></span>
+                                                    <span>🛑 Dừng cào ({crawlInfo?.total || 0} đã lấy)</span>
+                                                </button>
+                                            ) : (
+                                                <button 
+                                                    className="btn-crawl-sm" 
+                                                    disabled={crawling}
+                                                    onClick={() => handleStartCrawlComments(selectedPost)}
+                                                    title={crawling ? "⚠️ Đang có tiến trình cào bài viết (Post) đang chạy. Không thể cào bình luận cùng lúc." : ""}
+                                                    style={{ 
+                                                        padding: '8px 20px', 
+                                                        fontSize: '13px', 
+                                                        display: 'inline-flex', 
+                                                        alignItems: 'center', 
+                                                        gap: '8px', 
+                                                        margin: '0 auto',
+                                                        opacity: crawling ? 0.5 : 1,
+                                                        cursor: crawling ? 'not-allowed' : 'pointer'
+                                                    }}
+                                                >
+                                                    {crawling ? (
+                                                        <>
+                                                            <span>⚠️</span>
+                                                            <span>Đang cào bài viết (Post)...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span>⬇️</span>
+                                                            <span>Bắt đầu cào bình luận ngay</span>
+                                                        </>
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                }
+
+                                return (
+                                    <>
+                                        {crawling && (
+                                            <div style={{ padding: '8px 12px', marginBottom: '12px', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '6px', fontSize: '12px', color: '#eab308', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span>⚠️</span>
+                                                <span>Đang có tiến trình cào bài viết (Post) đang chạy. Tính năng cào bình luận tạm thời bị khóa cho đến khi cào bài viết xong.</span>
+                                            </div>
+                                        )}
+                                        {isCrawling && (
+                                            <div style={{ padding: '8px 12px', marginBottom: '12px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', borderRadius: '6px', fontSize: '12px', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span className="spinner-sm"></span>
+                                                <span>{crawlInfo?.message || 'Đang cập nhật thêm bình luận...'}</span>
+                                            </div>
+                                        )}
+                                        {comments.map((c, idx) => (
+                                            <div key={idx} className="comment-item">
+                                                <div className="c-header">
+                                                    <div className="c-avatar">
+                                                        {(c.avatar_url || c.author_avatar) ? (
+                                                            <img src={c.avatar_url || c.author_avatar} referrerPolicy="no-referrer" />
+                                                        ) : (
+                                                            <span style={{ fontSize: '14px' }}>👤</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="c-name">{c.author_name || 'Người dùng Facebook'}</div>
+                                                    <div className="c-time">{c.creation_datetime ? new Date(c.creation_datetime).toLocaleString('vi-VN') : ''}</div>
+                                                </div>
+                                                <div className="c-body">
+                                                    {c.body_text || c.message_text ? (
+                                                        c.body_text || c.message_text
+                                                    ) : (
+                                                        <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>[Hình ảnh / Nhãn dán / Không có nội dung chữ]</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                            {(() => {
+                                const pid = selectedPost.post_id || selectedPost.id;
+                                const crawlInfo = commentCrawlProgress[pid];
+                                const isCrawling = crawlInfo?.status === 'running' || crawlInfo?.status === 'queued';
+
+                                return (
+                                    <>
+                                        {comments.length > 0 && (
+                                            isCrawling ? (
+                                                <button 
+                                                    className="btn-crawl-sm danger" 
+                                                    onClick={() => stopCommentCrawl(pid)}
+                                                    style={{ 
+                                                        display: 'inline-flex', 
+                                                        alignItems: 'center', 
+                                                        gap: '6px',
+                                                        background: '#ef4444',
+                                                        color: '#fff',
+                                                        border: 'none',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                    title="Nhấn vào đây để DỪNG cào bình luận"
+                                                >
+                                                    <span className="spinner-sm" style={{ borderColor: '#fff', borderTopColor: 'transparent' }}></span>
+                                                    <span>🛑 Dừng cào ({crawlInfo?.total || comments.length})</span>
+                                                </button>
+                                            ) : (
+                                                <button 
+                                                    className="btn-crawl-sm" 
+                                                    disabled={crawling}
+                                                    onClick={() => handleStartCrawlComments(selectedPost)}
+                                                    title={crawling ? "⚠️ Đang có tiến trình cào bài viết (Post) đang chạy. Không thể cào bình luận cùng lúc." : ""}
+                                                    style={{ 
+                                                        display: 'inline-flex', 
+                                                        alignItems: 'center', 
+                                                        gap: '6px',
+                                                        opacity: crawling ? 0.5 : 1,
+                                                        cursor: crawling ? 'not-allowed' : 'pointer'
+                                                    }}
+                                                >
+                                                    {crawling ? '⚠️ Đang cào bài viết...' : '🔄 Cập nhật / Cào tiếp'}
+                                                </button>
+                                            )
+                                        )}
+                                        <button 
+                                            style={{
+                                                background: 'var(--bg-tertiary)',
+                                                border: '1px solid var(--border)',
+                                                color: 'var(--text-primary)',
+                                                padding: '6px 14px',
+                                                borderRadius: '6px',
+                                                fontSize: '12px',
+                                                cursor: 'pointer'
+                                            }}
+                                            onClick={closeComments}
+                                        >
+                                            Đóng
+                                        </button>
+                                    </>
+                                );
+                            })()}
                         </div>
                     </div>
                 </div>

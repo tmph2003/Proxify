@@ -7,6 +7,7 @@ Sử dụng Strategy Pattern để dễ dàng mở rộng các loại bóc tách
 
 import json
 import logging
+import re
 import urllib.parse
 from collections import deque
 from typing import Any, Optional, Dict, List
@@ -55,9 +56,42 @@ class DataHelper:
         if not s: return ""
         try:
             import base64
-            return base64.b64decode(s).decode()
+            return base64.b64decode(s).decode(errors="ignore")
         except:
             return s
+
+    @staticmethod
+    def extract_canonical_post_id(raw_id: str, feedback_id: str = None, permalink: str = None) -> str:
+        """Chuẩn hóa post_id về ID số duy nhất (canonical numeric ID).
+        Tránh trường hợp cùng 1 post nhưng Facebook trả về nhiều dạng ID khác nhau:
+        - UzpfSTYx... (ID câu chuyện tĩnh)
+        - UzpfSUZTOjE6... (ID con trỏ luồng đệm Infinite Feed Stream)
+        dẫn đến bị trùng lặp bản ghi khi upsert vào database.
+        """
+        import re
+        # 1. Trích xuất từ feedback_id (độ tin cậy cao nhất)
+        if feedback_id:
+            dec = DataHelper.decode_b64(feedback_id)
+            m = re.search(r'feedback:(\d+)', dec)
+            if m:
+                return m.group(1)
+                
+        # 2. Trích xuất từ liên kết permalink_url
+        if permalink:
+            m = re.search(r'/(?:posts|permalink|story_fbid)/(\d+)', permalink) or re.search(r'story_fbid=(\d+)', permalink)
+            if m:
+                return m.group(1)
+                
+        # 3. Trích xuất từ raw_id nếu có chứa mã VK
+        if raw_id:
+            dec = DataHelper.decode_b64(raw_id)
+            m = re.search(r':VK:(\d+)', dec) or re.search(r':(\d{10,})', dec)
+            if m:
+                return m.group(1)
+            if raw_id.isdigit():
+                return raw_id
+                
+        return raw_id
 
 
 class RequestParser:
@@ -125,16 +159,56 @@ class CommentExtractor:
         if not isinstance(node, dict) or not node.get('id'):
             return None
             
+        # Extract post_id from comment_id or feedback URL or vars_dict
+        extracted_post_id = None
+        cid = node.get("id", "")
+        if cid:
+            dec = DataHelper.decode_b64(cid)
+            m = re.search(r'comment:(\d+)_(\d+)', dec)
+            if m:
+                extracted_post_id = m.group(1)
+
+        if not extracted_post_id and isinstance(node.get("feedback"), dict):
+            fb_url = node.get("feedback", {}).get("url", "")
+            if fb_url:
+                m = re.search(r'/posts/(\d+)', fb_url)
+                if m:
+                    extracted_post_id = m.group(1)
+
+        vars_dict = vars_dict or {}
+        if not extracted_post_id and vars_dict:
+            target_fbid = vars_dict.get("id") or vars_dict.get("feedback_id") or vars_dict.get("comments_target_id")
+            if target_fbid:
+                dec_fbid = DataHelper.decode_b64(str(target_fbid))
+                m = re.search(r'feedback:(\d+)', dec_fbid)
+                if m:
+                    extracted_post_id = m.group(1)
+                elif str(target_fbid).isdigit():
+                    extracted_post_id = str(target_fbid)
+
+        # Feedback & Metrics (reactions, replies)
+        fb = node.get("feedback") if isinstance(node.get("feedback"), dict) else {}
+        reply_cnt = 0
+        react_cnt = 0
+        if fb:
+            comm = fb.get("comments")
+            if isinstance(comm, dict):
+                reply_cnt = comm.get("total_count", 0)
+            reactors = fb.get("reactors")
+            if isinstance(reactors, dict):
+                react_cnt = reactors.get("count", 0)
+
         comment = {
             "comment_id": node.get("id"),
+            "post_id": extracted_post_id,
             "parent_id": None,
             "parent_feedback_id": None,
             "author": None,
             "body_text": "",
             "creation_time": node.get("created_time"),
-            "reaction_count": 0,
-            "reply_count": 0,
-            "feedback_id": node.get("feedback", {}).get("id") if isinstance(node.get("feedback"), dict) else None
+            "reaction_count": react_cnt,
+            "reply_count": reply_cnt,
+            "feedback_id": fb.get("id") if fb else None
         }
 
         # Author
@@ -156,7 +230,6 @@ class CommentExtractor:
             comment['parent_id'] = parent.get('id')
 
         # Heuristics from request variables (if paginated)
-        vars_dict = vars_dict or {}
         if vars_dict:
             if 'comment_id' in vars_dict and not comment.get('parent_id'):
                 comment['parent_id'] = vars_dict['comment_id']
@@ -194,6 +267,14 @@ class PostExtractor:
         elif isinstance(node.get('owning_profile'), dict):
             target_id = node.get('owning_profile').get('id')
             target_type = node.get('owning_profile').get('__typename')
+            
+        # Tìm tất cả Group IDs xuất hiện trong Story
+        all_group_nodes = DataHelper.extract_nodes(node, 'Group')
+        all_group_ids = [str(g.get('id')) for g in all_group_nodes if g.get('id')]
+
+        c_times = DataHelper.find_key(node, "creation_time")
+        if not c_times:
+            c_times = DataHelper.find_key(node, "created_time")
 
         post = {
             "post_id": post_id,
@@ -202,7 +283,7 @@ class PostExtractor:
             "author": None,
             "message_text": "",
             "permalink_url": node.get('url') or node.get('permalink_url'),
-            "creation_time": node.get("creation_time"),
+            "creation_time": c_times[0] if c_times else None,
             "attachments": [],
             "seo_title": None,
             "is_text_only": 1,
@@ -212,7 +293,8 @@ class PostExtractor:
             "feedback_id": None,
             "request_id": request_id,
             "_target_id": target_id,
-            "_target_type": target_type
+            "_target_type": target_type,
+            "_all_group_ids": all_group_ids
         }
 
         # Author (Robust extraction from fb_scraper.py)
@@ -274,6 +356,15 @@ class PostExtractor:
         group_name = self._extract_group_name(node)
         if group_name:
             post["group_name"] = group_name
+
+        # Chuẩn hóa post_id thành canonical ID để cơ chế ON CONFLICT (post_id) hoạt động chính xác tuyệt đối
+        canonical_pid = DataHelper.extract_canonical_post_id(
+            post["post_id"],
+            feedback_id=post.get("feedback_id"),
+            permalink=post.get("permalink_url")
+        )
+        if canonical_pid:
+            post["post_id"] = canonical_pid
 
         return post
 
@@ -374,6 +465,11 @@ class DocumentLinker:
                         fb_db.authors.upsert(c["author"], cursor=cur)
                     # Fallback post_id if not found via Linking
                     post_id_val = c.get('post_id')
+                    if not post_id_val and c.get("comment_id"):
+                        dec = DataHelper.decode_b64(c["comment_id"])
+                        m = re.search(r'comment:(\d+)_', dec)
+                        if m:
+                            post_id_val = m.group(1)
                     
                     db_comment = {
                         "comment_id": c["comment_id"],
@@ -438,15 +534,21 @@ def extract_from_responses(responses: list[str], vars_dict: dict, group_id: str 
                     if post:
                         target_id = post.pop("_target_id", None)
                         target_type = post.pop("_target_type", None)
+                        all_group_ids = post.pop("_all_group_ids", [])
                         
                         # Loại bỏ bài viết thuộc Page/User hoặc Group khác (nếu đang quét Group cụ thể)
                         if group_id:
                             if target_type and target_type != 'Group':
-                                logger.info(f"Bỏ qua bài viết {post['post_id']} - thuộc về {target_type}, không phải Group")
+                                logger.debug(f"Bỏ qua bài viết {post['post_id']} - thuộc về {target_type}, không phải Group")
                                 continue
                             if group_numeric_id and str(group_numeric_id).isdigit():
                                 if target_id and str(target_id) != str(group_numeric_id):
-                                    logger.info(f"Bỏ qua bài viết {post['post_id']} - thuộc Group khác (ID: {target_id}) thay vì Group đang quét ({group_numeric_id})")
+                                    logger.debug(f"Bỏ qua bài viết {post['post_id']} - thuộc Group khác (ID: {target_id}) thay vì Group đang quét ({group_numeric_id})")
+                                    continue
+                                # Kiểm tra sâu (Deep Search): Nếu ID của group đang quét hoàn toàn không xuất hiện 
+                                # ở bất kỳ node Group nào trong toàn bộ JSON của bài viết, chứng tỏ đây là bài Suggested từ nguồn ngoài (Page/User)
+                                if target_id is None and str(group_numeric_id) not in all_group_ids:
+                                    logger.debug(f"Bỏ qua bài viết {post['post_id']} - không tìm thấy ID {group_numeric_id} ở bất kỳ đâu trong cấu trúc bài viết (có thể là Suggested Page post)")
                                     continue
 
                         # Filter by date range if provided
@@ -480,7 +582,7 @@ def extract_from_responses(responses: list[str], vars_dict: dict, group_id: str 
                 for rc in raw_comments:
                     comment = comment_extractor.extract(rc, vars_dict)
                     if comment:
-                        if post_id and not comment.get("post_id"):
+                        if post_id:
                             comment["post_id"] = post_id
                         extracted_comments.append(comment)
                         

@@ -145,7 +145,7 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
             console.error("Script error:", e);
         }
 
-        // 3. Quét toàn bộ Cookie của Facebook từ Cookie API
+        // 3. Quét toàn bộ Cookie của Facebook từ Cookie API (hỗ trợ cả Partitioned Cookies / CHIPS)
         status.innerText = "Đang quét Cookie...";
         let cookieMap = new Map();
 
@@ -155,7 +155,14 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
             }
         };
 
-        const targetNames = ["c_user", "xs", "sb", "datr", "fr", "wd", "locale", "presence", "i_user", "ps_n", "ps_l"];
+        const targetDomains = [
+            ".facebook.com",
+            "facebook.com",
+            "www.facebook.com",
+            "m.facebook.com",
+            "web.facebook.com"
+        ];
+
         const baseUrls = [
             "https://www.facebook.com",
             "https://facebook.com",
@@ -163,43 +170,82 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
             "https://web.facebook.com"
         ];
 
-        // Quét từng cookie cụ thể bằng chrome.cookies.get
-        for (const url of baseUrls) {
-            for (const name of targetNames) {
-                try {
-                    const c = await chrome.cookies.get({ url: url, name: name });
-                    addCookie(c);
-                } catch (e) { }
-            }
-        }
-
-        // Quét theo danh sách URL và domain
-        for (const url of baseUrls) {
-            try {
-                const list = await chrome.cookies.getAll({ url: url });
-                if (Array.isArray(list)) list.forEach(addCookie);
-            } catch (e) { }
-        }
-
-        for (const dom of [".facebook.com", "facebook.com", "www.facebook.com"]) {
+        // 3.1. Quét theo domain chuẩn (unpartitioned)
+        for (const dom of targetDomains) {
             try {
                 const list = await chrome.cookies.getAll({ domain: dom });
                 if (Array.isArray(list)) list.forEach(addCookie);
             } catch (e) { }
         }
 
-        // Quét tất cả Cookie Stores
+        // 3.2. Quét Partitioned Cookies (CHIPS) - Rất quan trọng trên Chrome 118+
+        for (const dom of targetDomains) {
+            try {
+                const list = await chrome.cookies.getAll({ domain: dom, partitionKey: {} });
+                if (Array.isArray(list)) list.forEach(addCookie);
+            } catch (e) { }
+        }
+
+        // 3.3. Quét theo partition topLevelSite cụ thể
+        for (const topSite of ["https://facebook.com", "https://www.facebook.com", "https://m.facebook.com"]) {
+            try {
+                const list = await chrome.cookies.getAll({ partitionKey: { topLevelSite: topSite } });
+                if (Array.isArray(list)) list.forEach(addCookie);
+            } catch (e) { }
+        }
+
+        // 3.4. Quét theo Tab URL nếu có
+        try {
+            const targetTab = await chrome.tabs.get(targetTabId);
+            if (targetTab && targetTab.url) {
+                try {
+                    const list = await chrome.cookies.getAll({ url: targetTab.url });
+                    if (Array.isArray(list)) list.forEach(addCookie);
+                } catch (e) { }
+                try {
+                    const list = await chrome.cookies.getAll({ url: targetTab.url, partitionKey: {} });
+                    if (Array.isArray(list)) list.forEach(addCookie);
+                } catch (e) { }
+            }
+        } catch (e) { }
+
+        // 3.5. Quét tất cả Cookie Stores
         try {
             const stores = await chrome.cookies.getAllCookieStores();
             for (const store of stores) {
                 for (const url of baseUrls) {
-                    for (const name of targetNames) {
-                        try {
-                            const c = await chrome.cookies.get({ url: url, name: name, storeId: store.id });
-                            addCookie(c);
-                        } catch (e) { }
-                    }
+                    try {
+                        const list = await chrome.cookies.getAll({ url: url, storeId: store.id });
+                        if (Array.isArray(list)) list.forEach(addCookie);
+                    } catch (e) { }
+                    try {
+                        const list = await chrome.cookies.getAll({ url: url, storeId: store.id, partitionKey: {} });
+                        if (Array.isArray(list)) list.forEach(addCookie);
+                    } catch (e) { }
                 }
+            }
+        } catch (e) { }
+
+        // 3.6. Quét toàn bộ kho cookie và lọc tên miền Facebook (bắt trọn mọi ngóc ngách)
+        try {
+            const allUnpart = await chrome.cookies.getAll({});
+            if (Array.isArray(allUnpart)) {
+                allUnpart.forEach(c => {
+                    if (c && c.domain && (c.domain.includes("facebook.com") || c.domain.includes("fb.com"))) {
+                        addCookie(c);
+                    }
+                });
+            }
+        } catch (e) { }
+
+        try {
+            const allPart = await chrome.cookies.getAll({ partitionKey: {} });
+            if (Array.isArray(allPart)) {
+                allPart.forEach(c => {
+                    if (c && c.domain && (c.domain.includes("facebook.com") || c.domain.includes("fb.com"))) {
+                        addCookie(c);
+                    }
+                });
             }
         } catch (e) { }
 
@@ -233,6 +279,8 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
             return;
         }
 
+        const hasXs = cookieMap.has("xs");
+        const hasCUser = cookieMap.has("c_user") || Boolean(userId);
         const userAgent = navigator.userAgent;
 
         // Gửi qua API của Proxify
@@ -244,7 +292,8 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
             fb_dtsg: fb_dtsg,
             lsd: lsd,
             sd: sd,
-            user_id: userId
+            user_id: userId,
+            cookie_names: Array.from(cookieMap.keys())
         };
 
         let success = false;
@@ -270,8 +319,8 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
 
         if (success) {
             let infoMsg = `✅ <b>ĐỒNG BỘ THÀNH CÔNG!</b><br>`;
-            infoMsg += `<small style="color:#a7f3d0">UID: <b>${userId || 'Đã nhận'}</b> | Token: <b>${fb_dtsg ? fb_dtsg.slice(0, 8) + '...' : 'Đã nạp'}</b></small><br><br>`;
-            infoMsg += `<span style="font-size:11px;color:#94a3b8">💡 <b>Tiếp theo:</b> Mở 1 Nhóm Facebook bất kỳ và cuộn 3-5 bài viết để Extension tự động lưu mẫu GraphQL.</span>`;
+            infoMsg += `<small style="color:#a7f3d0">UID: <b>${userId || 'Đã nhận'}</b> | Token: <b>${fb_dtsg ? fb_dtsg.slice(0, 10) + '...' : 'Đã nạp'}</b></small><br><br>`;
+            infoMsg += `<span style="font-size:11px;color:#94a3b8">💡 <b>Tiếp theo:</b> Mở Dashboard Proxify (cổng 8888) và bấm <b>Bắt đầu thu thập</b> để hệ thống chạy trực tiếp qua Tab Facebook!</span>`;
             status.innerHTML = infoMsg;
             status.style.color = "#10b981";
         } else {

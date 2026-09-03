@@ -13,7 +13,7 @@ from proxify.exporter import (
     export_to_json,
     export_to_python,
 )
-from proxify.storage import RequestStorage
+from proxify.core.traffic_storage import RequestStorage
 
 logger = logging.getLogger("proxify.dashboard")
 
@@ -26,7 +26,7 @@ class Dashboard:
         self.host = host
         self.port = port
         self.ws_clients: set[web.WebSocketResponse] = set()
-        self.app = web.Application()
+        self.app = web.Application(client_max_size=50 * 1024 * 1024)
         self._setup_routes()
 
     def _setup_routes(self):
