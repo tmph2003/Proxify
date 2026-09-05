@@ -161,3 +161,42 @@ class TestStealthResponse:
         resp = StealthResponse(200, b"", {}, is_blocked=True, attempts=3)
         assert "BLOCKED" in repr(resp)
         assert "3 attempts" in repr(resp)
+
+
+class TestFacebookStealth:
+    """Test Facebook stealth mechanics (SessionStateManager & DelayConfig)."""
+
+    def test_session_state_mutation(self):
+        from proxify.platforms.facebook.stealth import SessionStateManager
+        manager = SessionStateManager(counter_offset=10)
+        
+        # Case 1: When __s is missing, it should generate a valid session token
+        data_missing = {"existing_param": "val"}
+        manager.update_params(data_missing)
+        assert data_missing["__req"] == "a"  # 10 in base36 is 'a'
+        assert "__s" in data_missing
+        assert ":" in data_missing["__s"]
+        assert "__spin_t" in data_missing
+        assert manager.request_count == 1
+
+        # Case 2: When __s is already present from browser session, preserve it across requests
+        data_existing = {"existing_param": "val", "__s": "session_from_browser"}
+        manager.update_params(data_existing)
+        assert data_existing["__req"] == "b"  # 11 in base36 is 'b'
+        assert data_existing["__s"] == "session_from_browser"  # Preserves genuine browser session
+        assert manager.request_count == 2
+
+    def test_crawl_delay_config(self):
+        from proxify.platforms.facebook.stealth import comment_delay, page_delay, CrawlDelayConfig
+        config = CrawlDelayConfig()
+        
+        # Verify human-like minimum constraints
+        assert config.comment_min >= 1.5
+        assert config.page_min >= 2.0
+        
+        for _ in range(20):
+            c_delay = comment_delay(config)
+            assert c_delay >= 1.5
+            p_delay = page_delay(config)
+            assert p_delay >= 2.0
+

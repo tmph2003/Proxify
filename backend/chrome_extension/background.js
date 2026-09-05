@@ -2,7 +2,7 @@ let pendingGraphQLRequests = {};
 
 chrome.webRequest.onBeforeRequest.addListener(
     (details) => {
-        if (details.method !== "POST" || !details.url.includes("/api/graphql/")) return;
+        if (details.method !== "POST" || !details.url.includes("/api/graphql")) return;
 
         let formData = {};
         if (details.requestBody) {
@@ -20,9 +20,17 @@ chrome.webRequest.onBeforeRequest.addListener(
                         }
                     }
                     if (rawStr) {
-                        let params = new URLSearchParams(rawStr);
-                        for (let [key, val] of params.entries()) {
-                            formData[key] = val;
+                        if (rawStr.includes("Content-Disposition: form-data;")) {
+                            let regex = /Content-Disposition:\s*form-data;\s*name="([^"]+)"(?:;\s*filename="[^"]*")?(?:\r?\nContent-Type:[^\r\n]*)?\r?\n\r?\n([\s\S]*?)(?=\r?\n--|$)/g;
+                            let m;
+                            while ((m = regex.exec(rawStr)) !== null) {
+                                formData[m[1]] = m[2];
+                            }
+                        } else {
+                            let params = new URLSearchParams(rawStr);
+                            for (let [key, val] of params.entries()) {
+                                formData[key] = val;
+                            }
                         }
                     }
                 } catch (e) {
@@ -32,13 +40,24 @@ chrome.webRequest.onBeforeRequest.addListener(
         }
 
         let friendlyName = formData["fb_api_req_friendly_name"] || "";
+        if (!friendlyName && details.url.includes("fb_api_req_friendly_name=")) {
+            try {
+                let u = new URL(details.url);
+                friendlyName = u.searchParams.get("fb_api_req_friendly_name") || "";
+            } catch (e) { }
+        }
+        if (!friendlyName && formData["doc_id"]) {
+            friendlyName = "GraphQL_doc_" + formData["doc_id"];
+        }
+
         if (friendlyName) {
             let isTarget = friendlyName.includes("Group") || 
                            friendlyName.includes("Feed") || 
                            friendlyName.includes("Comment") || 
                            friendlyName.includes("UFI") ||
                            friendlyName.includes("Story") ||
-                           friendlyName.includes("Post");
+                           friendlyName.includes("Post") ||
+                           friendlyName.includes("GraphQL");
             if (isTarget) {
                 pendingGraphQLRequests[details.requestId] = {
                     form_data: formData,
@@ -48,7 +67,7 @@ chrome.webRequest.onBeforeRequest.addListener(
             }
         }
     },
-    { urls: ["*://*.facebook.com/api/graphql/*", "*://www.facebook.com/api/graphql/*"] },
+    { urls: ["*://*.facebook.com/api/graphql*", "*://facebook.com/api/graphql*"] },
     ["requestBody"]
 );
 
@@ -80,37 +99,52 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
             
             console.log(`[Proxify] Captured full template for ${friendlyName}! Sending to backend...`);
 
-            // Send to Proxify server silently
-            fetch("http://127.0.0.1:8888/api/facebook/cookie", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ feed_template: template, friendly_name: friendlyName })
-            }).then(res => res.json())
-              .then(data => console.log(`[Proxify] Backend acknowledged ${friendlyName}:`, data))
-              .catch(e => {
-                  fetch("http://localhost:8888/api/facebook/cookie", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ feed_template: template, friendly_name: friendlyName })
-                  }).catch(err => console.error("[Proxify] Error sending template to server:", err));
-              });
+            // Send to Proxify server silently with client_id
+            getExtensionConfig().then(cfg => {
+                fetch(`${cfg.serverUrl}/api/facebook/cookie`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ feed_template: template, friendly_name: friendlyName, client_id: cfg.clientId })
+                }).then(res => res.json())
+                  .then(data => console.log(`[Proxify] Backend acknowledged ${friendlyName} (${cfg.clientId}):`, data))
+                  .catch(e => {
+                      if (cfg.serverUrl.includes("127.0.0.1")) {
+                          fetch("http://localhost:8888/api/facebook/cookie", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ feed_template: template, friendly_name: friendlyName, client_id: cfg.clientId })
+                          }).catch(err => {});
+                      }
+                  });
+            });
 
             delete pendingGraphQLRequests[details.requestId];
         }
     },
-    { urls: ["*://*.facebook.com/api/graphql/*", "*://www.facebook.com/api/graphql/*"] },
+    { urls: ["*://*.facebook.com/api/graphql*", "*://facebook.com/api/graphql*"] },
     ["requestHeaders", "extraHeaders"]
 );
 
 // Cleanup maps to prevent memory leaks if requests fail or complete before headers are sent
-chrome.webRequest.onCompleted.addListener((details) => { delete pendingGraphQLRequests[details.requestId]; }, { urls: ["*://*.facebook.com/api/graphql/*"] });
-chrome.webRequest.onErrorOccurred.addListener((details) => { delete pendingGraphQLRequests[details.requestId]; }, { urls: ["*://*.facebook.com/api/graphql/*"] });
+chrome.webRequest.onCompleted.addListener((details) => { delete pendingGraphQLRequests[details.requestId]; }, { urls: ["*://*.facebook.com/api/graphql*", "*://facebook.com/api/graphql*"] });
+chrome.webRequest.onErrorOccurred.addListener((details) => { delete pendingGraphQLRequests[details.requestId]; }, { urls: ["*://*.facebook.com/api/graphql*", "*://facebook.com/api/graphql*"] });
 
 // ==========================================
-// EXTENSION BRIDGE: Native Fetch Execution
+// CONFIGURATION HELPER (Multi-Client)
 // ==========================================
-const PROXIFY_BRIDGE_JOBS = "http://127.0.0.1:8888/api/facebook/bridge/jobs";
-const PROXIFY_BRIDGE_RESULT = "http://127.0.0.1:8888/api/facebook/bridge/result";
+async function getExtensionConfig() {
+    return new Promise(resolve => {
+        if (chrome.storage && chrome.storage.local) {
+            chrome.storage.local.get({ serverUrl: "http://127.0.0.1:8888", clientId: "default" }, (items) => {
+                let sUrl = (items.serverUrl || "http://127.0.0.1:8888").trim().replace(/\/+$/, "");
+                let cId = (items.clientId || "default").trim() || "default";
+                resolve({ serverUrl: sUrl, clientId: cId });
+            });
+        } else {
+            resolve({ serverUrl: "http://127.0.0.1:8888", clientId: "default" });
+        }
+    });
+}
 
 // Alarms to ensure service worker stays awake
 chrome.alarms.create("bridge_poll_keepalive", { periodInMinutes: 0.2 });
@@ -127,10 +161,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 });
 
-const PROXIFY_COOKIE_API = "http://127.0.0.1:8888/api/facebook/cookie";
 let lastCookieSyncTime = 0;
 
-async function syncFacebookCookies() {
+async function syncFacebookCookies(serverUrl, clientId) {
     const now = Date.now();
     if (now - lastCookieSyncTime < 15000) return;
     lastCookieSyncTime = now;
@@ -155,14 +188,15 @@ async function syncFacebookCookies() {
         const names = Array.from(cookieMap.keys());
 
         if (cookieMap.has("c_user") || names.length > 0) {
-            await fetch(PROXIFY_COOKIE_API, {
+            await fetch(`${serverUrl}/api/facebook/cookie`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     cookie: cookieString,
                     user_id: cookieMap.get("c_user") || "",
                     user_agent: navigator.userAgent,
-                    cookie_names: names
+                    cookie_names: names,
+                    client_id: clientId
                 })
             });
         }
@@ -177,14 +211,16 @@ async function pollForBridgeJobs() {
     if (isPolling || isExecutingJob) return;
     isPolling = true;
     try {
-        syncFacebookCookies();
-        let res = await fetch(PROXIFY_BRIDGE_JOBS);
+        const cfg = await getExtensionConfig();
+        await syncFacebookCookies(cfg.serverUrl, cfg.clientId);
+        
+        let res = await fetch(`${cfg.serverUrl}/api/facebook/bridge/jobs?client_id=${encodeURIComponent(cfg.clientId)}`);
         if (res.ok) {
             let data = await res.json();
             if (data.job) {
-                console.log("[Proxify Bridge] Received job:", data.job.id);
+                console.log(`[Proxify Bridge] Received job ${data.job.id} for client: ${cfg.clientId}`);
                 isExecutingJob = true;
-                executeBridgeJob(data.job).finally(() => {
+                executeBridgeJob(data.job, cfg.serverUrl, cfg.clientId).finally(() => {
                     isExecutingJob = false;
                 });
             }
@@ -199,7 +235,7 @@ async function pollForBridgeJobs() {
     setTimeout(pollForBridgeJobs, 1000);
 }
 
-async function executeBridgeJob(job) {
+async function executeBridgeJob(job, serverUrl, clientId) {
     try {
         let text = "";
         let statusCode = 200;
@@ -248,24 +284,19 @@ async function executeBridgeJob(job) {
                     args: [job.url, job.method || "POST", job.headers || {}, job.body],
                     func: async (url, method, headers, body) => {
                         try {
-                            // 1. Kiểm tra quyền xem bài viết trong nhóm trên giao diện
-                            const bodyText = document.body ? document.body.innerText : "";
-                            const isRestricted = bodyText.includes("Nội dung này hiện không khả dụng") || 
-                                                 bodyText.includes("This content isn't available");
-                            const hasJoinButton = Boolean(document.querySelector('[aria-label="Tham gia nhóm"], [aria-label="Join group"], [aria-label="Tham gia"]'));
-
-                            if (isRestricted || hasJoinButton) {
+                            // GUARDRAIL: Chỉ cho phép /api/graphql/ bên trong tab để bảo vệ an toàn tài khoản
+                            if (!url || !url.includes("/api/graphql")) {
+                                console.error("[Proxify Bridge] TỪ CHỐI thực thi request không phải GraphQL bên trong tab:", url);
                                 return {
                                     status_code: 403,
-                                    text: JSON.stringify({
-                                        error: 1357001,
-                                        errorSummary: "Bạn chưa là thành viên của nhóm này",
-                                        errorDescription: "Nhóm này là nhóm Riêng tư và tài khoản Facebook hiện tại chưa được duyệt vào nhóm. Vui lòng bấm 'Tham gia nhóm' trên Facebook trước khi thu thập."
-                                    })
+                                    text: "Rejected: In-tab execution strictly permits /api/graphql/ endpoints only.",
+                                    executed_in_tab: true,
+                                    tab_url: window.location.href,
+                                    tab_error: "Non-GraphQL request rejected for account safety."
                                 };
                             }
 
-                            // 2. Trích xuất token bảo mật LIVE trực tiếp từ trang Facebook đang mở
+                            // 1. Trích xuất token bảo mật LIVE trực tiếp từ trang Facebook đang mở
                             let liveDtsg = null;
                             let liveUserId = null;
                             let liveLsd = null;
@@ -276,7 +307,7 @@ async function executeBridgeJob(job) {
                                     if (!liveDtsg) {
                                         try { liveDtsg = window.require("DTSG")?.getToken?.(); } catch(e){}
                                     }
-                                    try { liveUserId = window.require("CurrentUserInitialData")?.USER_ID; } catch(e){}
+                                    try { liveUserId = window.require("CurrentUserInitialData")?.USER_ID || window.require("CurrentUserInitialData")?.ACCOUNT_ID; } catch(e){}
                                     try { liveLsd = window.require("LSD")?.token; } catch(e){}
                                 }
                             } catch(e) {}
@@ -300,25 +331,21 @@ async function executeBridgeJob(job) {
                                 if (input) liveLsd = input.value;
                             }
 
-                            // 3. Cập nhật body với token LIVE (chỉ khi body chưa có token)
+                            // 2. Bổ sung token LIVE vào body nếu body chưa có hoặc thiếu token (bảo toàn tính nhất quán)
                             let updatedBody = body;
-                            if (liveDtsg && typeof updatedBody === "string" && !updatedBody.includes("fb_dtsg=")) {
-                                const liveJazoest = "2" + liveDtsg.split('').reduce((sum, c) => sum + c.charCodeAt(0), 0);
-                                updatedBody = updatedBody ? `${updatedBody}&fb_dtsg=${encodeURIComponent(liveDtsg)}` : `fb_dtsg=${encodeURIComponent(liveDtsg)}`;
-                                if (!updatedBody.includes("jazoest=")) {
-                                    updatedBody = `${updatedBody}&jazoest=${liveJazoest}`;
+                            if (typeof updatedBody === "string" && updatedBody) {
+                                if (liveDtsg && (!updatedBody.includes("fb_dtsg=") || updatedBody.includes("fb_dtsg=&") || updatedBody.endsWith("fb_dtsg="))) {
+                                    const liveJazoest = "2" + liveDtsg.split('').reduce((sum, c) => sum + c.charCodeAt(0), 0);
+                                    updatedBody = `${updatedBody}&fb_dtsg=${encodeURIComponent(liveDtsg)}&jazoest=${liveJazoest}`;
+                                }
+                                if (liveUserId && (!updatedBody.includes("__user=") || updatedBody.includes("__user=&") || updatedBody.endsWith("__user="))) {
+                                    updatedBody = `${updatedBody}&__user=${liveUserId}&av=${liveUserId}`;
+                                }
+                                if (liveLsd && (!updatedBody.includes("lsd=") || updatedBody.includes("lsd=&") || updatedBody.endsWith("lsd="))) {
+                                    updatedBody = `${updatedBody}&lsd=${encodeURIComponent(liveLsd)}`;
                                 }
                             }
-                            if (liveUserId && typeof updatedBody === "string" && !updatedBody.includes("__user=")) {
-                                updatedBody = updatedBody ? `${updatedBody}&__user=${liveUserId}` : `__user=${liveUserId}`;
-                                if (!updatedBody.includes("av=")) {
-                                    updatedBody = `${updatedBody}&av=${liveUserId}`;
-                                }
-                            }
-                            if (liveLsd && typeof updatedBody === "string" && !updatedBody.includes("lsd=")) {
-                                updatedBody = updatedBody ? `${updatedBody}&lsd=${encodeURIComponent(liveLsd)}` : `lsd=${encodeURIComponent(liveLsd)}`;
-                            }
-                            if (headers && liveLsd) {
+                            if (headers && liveLsd && !headers["x-fb-lsd"]) {
                                 headers["x-fb-lsd"] = liveLsd;
                             }
 
@@ -434,27 +461,15 @@ async function executeBridgeJob(job) {
             console.warn("[Proxify Bridge] Lỗi thực thi qua Tab:", tabErr);
         }
 
-        // ƯU TIÊN 2: Fallback qua Service Worker fetch nếu không có tab Facebook
+        // BẢO VỆ AN TOÀN: Tuyệt đối KHÔNG fallback qua Service Worker fetch để tránh rò rỉ Origin chrome-extension://
         if (!executedInTab) {
-            console.log(`[Proxify Bridge] Fallback thực thi qua Service Worker fetch cho job ${job.id}`);
-            const method = job.method || "POST";
-            let fetchOptions = {
-                method: method,
-                headers: job.headers || {},
-                credentials: "include",
-                mode: "cors"
-            };
-            const isGetOrHead = method.toUpperCase() === "GET" || method.toUpperCase() === "HEAD";
-            if (!isGetOrHead && job.body) {
-                fetchOptions.body = job.body;
-                if (!fetchOptions.headers["Content-Type"] && !fetchOptions.headers["content-type"]) {
-                    fetchOptions.headers["Content-Type"] = "application/x-www-form-urlencoded";
-                }
-            }
-            
-            let res = await fetch(job.url, fetchOptions);
-            text = await res.text();
-            statusCode = res.status;
+            console.error(`[Proxify Bridge] Không có tab Facebook nào khả dụng để thực thi job ${job.id}. Từ chối gửi từ Service Worker để tránh vi phạm bot detection.`);
+            statusCode = 0;
+            text = JSON.stringify({
+                status: "error",
+                message: "Không tìm thấy tab Facebook đang mở trong Chrome. Vui lòng mở 1 tab Facebook (facebook.com) và thử lại."
+            });
+            tabError = tabError || "Không tìm thấy tab Facebook đang hoạt động.";
         }
         
         let result = {
@@ -467,22 +482,22 @@ async function executeBridgeJob(job) {
         };
         
         // Gửi kết quả về Proxify
-        const sendRes = await fetch(PROXIFY_BRIDGE_RESULT, {
+        const sendRes = await fetch(`${serverUrl}/api/facebook/bridge/result`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: job.id, result: result })
+            body: JSON.stringify({ id: job.id, client_id: clientId, result: result })
         });
         if (!sendRes.ok) {
             console.error(`[Proxify Bridge] Lỗi HTTP ${sendRes.status} khi gửi kết quả job ${job.id} về backend:`, await sendRes.text());
         }
-        console.log(`[Proxify Bridge] Hoàn tất job ${job.id} (Status: ${statusCode}, Len: ${text.length}, InTab: ${executedInTab})`);
+        console.log(`[Proxify Bridge] Hoàn tất job ${job.id} cho client ${clientId} (Status: ${statusCode}, Len: ${text.length}, InTab: ${executedInTab})`);
     } catch (e) {
         console.error(`[Proxify Bridge] Job ${job.id} thất bại:`, e);
         try {
-            await fetch(PROXIFY_BRIDGE_RESULT, {
+            await fetch(`${serverUrl}/api/facebook/bridge/result`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: job.id, result: { status_code: 0, text: "Fetch failed: " + e.message, executed_in_tab: false, tab_error: e.message } })
+                body: JSON.stringify({ id: job.id, client_id: clientId, result: { status_code: 0, text: "Fetch failed: " + e.message, executed_in_tab: false, tab_error: e.message } })
             });
         } catch(postErr) {}
     }

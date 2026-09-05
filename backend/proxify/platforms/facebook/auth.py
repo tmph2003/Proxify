@@ -18,9 +18,73 @@ from proxify.utils.stealth import StealthSessionManager
 logger = logging.getLogger("proxify.facebook.auth")
 
 
-# ─── 1. In-Memory Token & Template Store (Pure RAM) ──────────────────────────
+# ─── 1. In-Memory Token & Template Store (Pure RAM, Multi-Tenant) ─────────────
 
-IN_MEMORY_TEMPLATES = {}
+from typing import Dict, Any, Optional, Tuple
+
+TENANT_TEMPLATES: Dict[str, dict] = {}
+TENANT_COOKIES: Dict[str, dict] = {}
+
+class _TenantDictProxy(dict):
+    """Backwards-compatible dictionary proxy delegating to a tenant in storage."""
+    def __init__(self, storage: Dict[str, dict], default_key: str = "default"):
+        super().__init__()
+        self._storage = storage
+        self._default_key = default_key
+
+    def _target(self) -> dict:
+        return self._storage.setdefault(self._default_key, {})
+
+    def __getitem__(self, key):
+        return self._target()[key]
+
+    def __setitem__(self, key, value):
+        self._target()[key] = value
+
+    def __delitem__(self, key):
+        del self._target()[key]
+
+    def __contains__(self, key):
+        return key in self._target()
+
+    def __len__(self):
+        return len(self._target())
+
+    def __iter__(self):
+        return iter(self._target())
+
+    def __bool__(self):
+        return bool(self._target())
+
+    def __repr__(self):
+        return repr(self._target())
+
+    def __eq__(self, other):
+        return self._target() == other
+
+    def get(self, key, default=None):
+        return self._target().get(key, default)
+
+    def setdefault(self, key, default=None):
+        return self._target().setdefault(key, default)
+
+    def keys(self):
+        return self._target().keys()
+
+    def values(self):
+        return self._target().values()
+
+    def items(self):
+        return self._target().items()
+
+    def copy(self):
+        return self._target().copy()
+
+    def update(self, *args, **kwargs):
+        return self._target().update(*args, **kwargs)
+
+IN_MEMORY_TEMPLATES = _TenantDictProxy(TENANT_TEMPLATES, "default")
+IN_MEMORY_COOKIES = _TenantDictProxy(TENANT_COOKIES, "default")
 
 
 def save_session_cache() -> None:
@@ -35,9 +99,12 @@ def load_session_cache() -> None:
     pass
 
 
-async def get_saved_tokens() -> Optional[dict]:
-    """Lấy templates hiện có từ bộ nhớ RAM."""
-    if IN_MEMORY_TEMPLATES:
+async def get_saved_tokens(client_id: str = "default") -> Optional[dict]:
+    """Lấy templates hiện có từ bộ nhớ RAM theo client_id."""
+    tenant_tpls = TENANT_TEMPLATES.get(client_id)
+    if tenant_tpls and len(tenant_tpls) > 0:
+        return tenant_tpls
+    if len(IN_MEMORY_TEMPLATES) > 0:
         return IN_MEMORY_TEMPLATES
     return None
 
@@ -95,7 +162,7 @@ async def fetch_fb_auth_tokens(cookie_str: str, user_agent: str) -> Tuple[Option
 
     headers = {
         "cookie": cookie_str,
-        "user-agent": user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+        "user-agent": user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "accept-language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
         "sec-fetch-site": "none",

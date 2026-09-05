@@ -283,8 +283,21 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
         const hasCUser = cookieMap.has("c_user") || Boolean(userId);
         const userAgent = navigator.userAgent;
 
+        let config = { serverUrl: "http://127.0.0.1:8888", clientId: "default" };
+        try {
+            if (chrome.storage && chrome.storage.local) {
+                config = await new Promise(resolve => {
+                    chrome.storage.local.get({ serverUrl: "http://127.0.0.1:8888", clientId: "default" }, resolve);
+                });
+            }
+        } catch (storageErr) {
+            console.warn("[Proxify Popup] Không thể đọc chrome.storage.local, dùng mặc định:", storageErr);
+        }
+        const activeServerUrl = (config.serverUrl || "http://127.0.0.1:8888").replace(/\/+$/, "");
+        const activeClientId = config.clientId || "default";
+
         // Gửi qua API của Proxify
-        status.innerText = "Đang gửi vào Proxify...";
+        status.innerText = `Đang gửi vào Proxify (${activeClientId})...`;
 
         const payload = {
             cookie: cookieStr,
@@ -293,12 +306,13 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
             lsd: lsd,
             sd: sd,
             user_id: userId,
-            cookie_names: Array.from(cookieMap.keys())
+            cookie_names: Array.from(cookieMap.keys()),
+            client_id: activeClientId
         };
 
         let success = false;
         try {
-            const res = await fetch("http://127.0.0.1:8888/api/facebook/cookie", {
+            const res = await fetch(`${activeServerUrl}/api/facebook/cookie`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
@@ -306,25 +320,18 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
             const data = await res.json();
             if (data.status === "ok") success = true;
         } catch (e) {
-            try {
-                const res = await fetch("http://localhost:8888/api/facebook/cookie", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (data.status === "ok") success = true;
-            } catch (err) { }
+            console.error("Failed to sync to primary serverUrl:", e);
         }
 
         if (success) {
             let infoMsg = `✅ <b>ĐỒNG BỘ THÀNH CÔNG!</b><br>`;
-            infoMsg += `<small style="color:#a7f3d0">UID: <b>${userId || 'Đã nhận'}</b> | Token: <b>${fb_dtsg ? fb_dtsg.slice(0, 10) + '...' : 'Đã nạp'}</b></small><br><br>`;
-            infoMsg += `<span style="font-size:11px;color:#94a3b8">💡 <b>Tiếp theo:</b> Mở Dashboard Proxify (cổng 8888) và bấm <b>Bắt đầu thu thập</b> để hệ thống chạy trực tiếp qua Tab Facebook!</span>`;
+            infoMsg += `<small style="color:#a7f3d0">Client: <b>${activeClientId}</b> | UID: <b>${userId || 'Đã nhận'}</b></small><br>`;
+            infoMsg += `<small style="color:#94a3b8">Token: <b>${fb_dtsg ? fb_dtsg.slice(0, 10) + '...' : 'Đã nạp'}</b></small><br><br>`;
+            infoMsg += `<span style="font-size:11px;color:#94a3b8">💡 <b>Tiếp theo:</b> Mở Dashboard Proxify (${activeServerUrl}) và bấm <b>Bắt đầu thu thập</b>!</span>`;
             status.innerHTML = infoMsg;
             status.style.color = "#10b981";
         } else {
-            status.innerHTML = "❌ <b>Lỗi kết nối Proxify!</b><br><small style='color:#fca5a5'>Hãy đảm bảo backend đang chạy ở port 8888.</small>";
+            status.innerHTML = `❌ <b>Lỗi kết nối Proxify!</b><br><small style='color:#fca5a5'>Không thể kết nối tới: ${activeServerUrl}</small>`;
             status.style.color = "#ef4444";
         }
 
@@ -336,4 +343,36 @@ document.getElementById('getCookieBtn').addEventListener('click', async () => {
 
     btn.disabled = false;
     btn.style.opacity = '1';
+});
+
+// ─── Cấu hình Server URL & Client ID (Multi-Client) ──────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+    const serverUrlInput = document.getElementById("serverUrlInput");
+    const clientIdInput = document.getElementById("clientIdInput");
+    const saveConfigBtn = document.getElementById("saveConfigBtn");
+    const configStatus = document.getElementById("configStatus");
+
+    if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get({ serverUrl: "http://127.0.0.1:8888", clientId: "default" }, (items) => {
+            if (serverUrlInput) serverUrlInput.value = items.serverUrl || "http://127.0.0.1:8888";
+            if (clientIdInput) clientIdInput.value = items.clientId || "default";
+        });
+    }
+
+    if (saveConfigBtn) {
+        saveConfigBtn.addEventListener("click", () => {
+            let sUrl = (serverUrlInput ? serverUrlInput.value : "").trim().replace(/\/+$/, "");
+            if (!sUrl) sUrl = "http://127.0.0.1:8888";
+            let cId = (clientIdInput ? clientIdInput.value : "").trim();
+            if (!cId) cId = "default";
+
+            chrome.storage.local.set({ serverUrl: sUrl, clientId: cId }, () => {
+                if (configStatus) {
+                    configStatus.innerText = `✅ Đã lưu (${cId})!`;
+                    configStatus.style.display = "block";
+                    setTimeout(() => { configStatus.style.display = "none"; }, 2500);
+                }
+            });
+        });
+    }
 });

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <style>
         body { 
-            width: 250px; 
+            width: 270px; 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
             padding: 16px; 
             text-align: center; 
@@ -30,12 +30,67 @@
             font-size: 13px; 
             min-height: 20px;
         }
+        .config-box {
+            margin-top: 14px;
+            text-align: left;
+            font-size: 11px;
+            border-top: 1px solid #333;
+            padding-top: 10px;
+        }
+        details summary {
+            cursor: pointer;
+            color: #93c5fd;
+            font-weight: 500;
+            outline: none;
+        }
+        .form-group {
+            margin-top: 8px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 3px;
+            color: #aaa;
+        }
+        .form-group input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #2a2a2a;
+            color: white;
+            font-size: 11px;
+        }
+        .save-btn {
+            background: #059669;
+            margin-top: 8px;
+            padding: 6px;
+            font-size: 11px;
+        }
+        .save-btn:hover { background: #047857; }
     </style>
 </head>
 <body>
     <h3>🍪 Proxify Extractor</h3>
     <button id="getCookieBtn">Bắn Cookie vào Proxify</button>
     <div id="status">Sẵn sàng</div>
+    
+    <div class="config-box">
+        <details id="configDetails">
+            <summary>⚙️ Cấu hình Server & Client ID</summary>
+            <div class="form-group">
+                <label for="serverUrlInput">Server URL:</label>
+                <input type="text" id="serverUrlInput" placeholder="http://127.0.0.1:8888">
+            </div>
+            <div class="form-group">
+                <label for="clientIdInput">Client ID / Tenant:</label>
+                <input type="text" id="clientIdInput" placeholder="default">
+            </div>
+            <button id="saveConfigBtn" class="save-btn">Lưu cấu hình</button>
+            <div id="configStatus" style="font-size:10px;margin-top:4px;color:#10b981;display:none;">Đã lưu!</div>
+        </details>
+    </div>
+
     <script src="popup.js"></script>
 </body>
 </html>

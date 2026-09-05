@@ -10,7 +10,8 @@
     "tabs",
     "webRequest",
     "webRequestExtraHeaders",
-    "alarms"
+    "alarms",
+    "storage"
   ],
   "host_permissions": [
     "<all_urls>"

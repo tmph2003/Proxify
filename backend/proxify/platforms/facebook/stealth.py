@@ -33,13 +33,13 @@ class CrawlDelayConfig:
     page_min: float = 2.0
     page_max: float = 8.0
 
-    # Độ trễ giữa các lượt cào bình luận/phản hồi con
-    comment_mean: float = 0.7
-    comment_std: float = 0.3
-    comment_min: float = 0.3
-    comment_max: float = 1.5
+    # Độ trễ giữa các lượt cào bình luận/phản hồi con (Ngưỡng tự nhiên tránh bị đánh dấu bot)
+    comment_mean: float = 2.5
+    comment_std: float = 0.8
+    comment_min: float = 1.5
+    comment_max: float = 5.0
 
-    # Xác suất xuất hiện khoảng dừng lâu (mô phỏng người dùng đọc bài viết)
+    # Xác suất xuất hiện khoảng dừng lâu (mô phỏng người dùng đọc bài viết/bình luận)
     long_pause_chance: float = 0.10
     long_pause_min: float = 5.0
     long_pause_max: float = 15.0
@@ -65,9 +65,12 @@ def page_delay(config: CrawlDelayConfig = DEFAULT_DELAY_CONFIG) -> float:
 
 def comment_delay(config: CrawlDelayConfig = DEFAULT_DELAY_CONFIG) -> float:
     """Tính toán thời gian nghỉ tự nhiên giữa các lượt cào bình luận."""
-    return _gaussian_clamped(
+    delay = _gaussian_clamped(
         config.comment_mean, config.comment_std, config.comment_min, config.comment_max,
     )
+    if random.random() < 0.05:
+        delay += random.uniform(3.0, 7.0)
+    return delay
 
 
 # ─── 2. Đột Biến Dữ Liệu Phiên Động (Session State Mutation) ──────────────────
@@ -91,7 +94,7 @@ class SessionStateManager:
         """Đột biến trực tiếp các tham số __req, __s, __spin_t trong dict form_data."""
         counter = self._counter_offset + self._request_count
         data["__req"] = self._encode_base36(counter)
-        if "__s" not in data:
+        if "__s" not in data or not data["__s"]:
             data["__s"] = self._gen_session_token()
         data["__spin_t"] = str(int(time.time()))
         self._request_count += 1
