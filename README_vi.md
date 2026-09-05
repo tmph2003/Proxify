@@ -75,10 +75,14 @@
 
 ### 📘 1. Facebook Platform (`platforms/facebook/`)
 - **Tách Rời Feed & Comment ($50\times$ Speedup)**: Cào danh sách bài viết nhóm theo thứ tự thời gian (`CHRONOLOGICAL`) siêu tốc (~1.5s/trang), tách biệt hoàn toàn với tiến trình cào bình luận.
+- **Cơ Chế Làm Mới Bài Viết Kép & Phòng Thủ Checkpoint (Dual-Engine Post Refresh & Zero-Checkpoint)**:
+  - **Engine Ẩn Danh Không Dùng Cookie (Zero-Cookie Anonymous Engine)**: Tự động cập nhật số lượng cảm xúc, lượt bình luận và trạng thái bài viết công khai siêu tốc qua HTTP/2 fingerprinted browser mà không cần truyền cookie tài khoản, triệt tiêu 100% nguy cơ checkpoint.
+  - **Extension Bridge GraphQL Fallback**: Tự động chuyển tiếp sang Chrome Extension để truy vấn GraphQL an toàn trong ngữ cảnh tab thật đối với các nhóm kín hoặc bài viết riêng tư.
+- **Đa Phiên Chrome Extension Cách Ly Tuyệt Đối (Multi-Tenant Isolation)**: Phân phối tác vụ theo `client_id`, cơ chế heartbeat và quản lý token độc lập, cho phép nhiều profile trình duyệt kết nối cùng lúc mà không xung đột trạng thái.
 - **Tự Động Thu Thập "Tất Cả Bình Luận"**: Cưỡng chế `CHRONOLOGICAL_UNFILTERED_INTENT_V1` để lấy sạch 100% bình luận (kể cả bình luận bị Facebook xếp vào spam hoặc ẩn).
 - **Phân Trang 2 Chiều (Bi-Directional Relay Pagination)**: Hỗ trợ đồng thời cả `before` và `after` cursor, nâng giới hạn lên đến 500 trang (~5,000 bình luận/bài viết).
-- **Điều Khiển Bắt Đầu / Dừng Cào Tức Thì**: Nút bấm dừng cào linh hoạt kèm hủy bỏ tác vụ nền ngay lập tức.
-- **Giao Diện Facebook Dashboard**: Quản lý phiên, lọc theo tác giả, ngày tháng, tìm kiếm full-text và modal xem chi tiết bình luận đa cấp.
+- **Thanh Tác Vụ Nổi Tương Tác (Interactive Floating Action Bar)**: Hỗ trợ làm mới hàng loạt, đồng bộ trạng thái, cào bình luận ngầm theo dõi thời gian thực và xuất dữ liệu ra CSV.
+- **Giao Diện Facebook Dashboard Nâng Cao**: Bộ chọn nhóm, lọc theo tác giả, ngày tháng, tìm kiếm full-text và modal xem cây bình luận phân cấp chuyên sâu.
 
 ### 💬 2. Zalo Platform (`platforms/zalo/` & `plugins/zalo.py`)
 - **Giải Mã Giao Thức Zalo**: Sử dụng engine JavaScript nhúng (`crypto_subtle.js`) để giải mã các gói tin mã hóa đầu cuối (E2EE) và dữ liệu WebSocket của Zalo Web.

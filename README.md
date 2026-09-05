@@ -75,9 +75,13 @@ Built on the industrial-grade **Mitmproxy 10** engine, Proxify seamlessly unites
 
 ### 📘 1. Facebook Platform (`platforms/facebook/`)
 - **Decoupled Feed & Comment Engine (50x Faster)**: Super-fast chronological feed scraping (~1.5s/page) decoupled from deep comment extraction.
+- **Dual-Engine Post Refresh & Zero-Checkpoint Architecture**:
+  - **Zero-Cookie Anonymous Engine**: Instantly refreshes reactions, comment counts, and post availability using browser-fingerprinted HTTP/2 sessions without sending account cookies, eliminating checkpoint risks.
+  - **Extension Bridge GraphQL Fallback**: Seamless fallback for private groups executing strictly scoped `/api/graphql/` queries inside the user's authentic tab.
+- **Multi-Tenant Chrome Extension Isolation**: Client ID-based job queues, heartbeats, and token caching allowing multiple concurrent browser sessions without state collision.
 - **Automatic Unfiltered Comments**: Automatically enforces `CHRONOLOGICAL_UNFILTERED_INTENT_V1` to capture 100% of all comments without manual UI toggles.
 - **Bi-Directional Relay Pagination**: Comprehensive handling of both `before` and `after` cursors up to 500 pages (~5,000 comments/post).
-- **Live Start / Stop Toggle Controls**: Immediate cancellation of background comment scraping tasks.
+- **Interactive Floating Action Bar**: Bulk refresh, status verification, background comment crawling with live progress polling, and CSV export.
 - **Facebook Dashboard Console**: Group selector, author filters, full-text search, and multi-level comment hierarchy viewer.
 
 ### 💬 2. Zalo Platform (`platforms/zalo/` & `plugins/zalo.py`)

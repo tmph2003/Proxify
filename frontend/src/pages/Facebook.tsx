@@ -14,6 +14,7 @@ export const FacebookPage: React.FC = () => {
         crawlPostComments, stopCommentCrawl, commentCrawlProgress, isCommentCrawling } = useFacebook();
 
     const [groupId, setGroupId] = useState(localStorage.getItem('fb_groupId') || '');
+    const [targetType, setTargetType] = useState<'group' | 'profile'>(localStorage.getItem('fb_targetType') as any || 'group');
     const [cookieExpanded, setCookieExpanded] = useState(false);
     const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
     const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
@@ -64,8 +65,9 @@ export const FacebookPage: React.FC = () => {
     const handleStartCrawl = () => {
         localStorage.setItem('fb_groupId', groupId);
         localStorage.setItem('fb_dtsg', fbDtsgInput);
+        localStorage.setItem('fb_targetType', targetType);
         
-        startCrawl(groupId, startDateFilter, endDateFilter);
+        startCrawl(groupId, startDateFilter, endDateFilter, targetType);
     };
 
     const handleGroupFilterChange = (id: string, name: string) => {
@@ -180,11 +182,38 @@ export const FacebookPage: React.FC = () => {
                     )}
                 </div>
 
+                {/* Target Type Selector */}
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px', padding: '3px' }}>
+                    <button 
+                        onClick={() => { setTargetType('group'); localStorage.setItem('fb_targetType', 'group'); }}
+                        style={{
+                            flex: 1, padding: '8px 12px', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+                            background: targetType === 'group' ? 'var(--accent)' : 'transparent',
+                            color: targetType === 'group' ? 'white' : 'var(--text-secondary)',
+                            transition: 'all 0.2s',
+                        }}
+                    >👥 Nhóm (Group)</button>
+                    <button 
+                        onClick={() => { setTargetType('profile'); localStorage.setItem('fb_targetType', 'profile'); }}
+                        style={{
+                            flex: 1, padding: '8px 12px', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+                            background: targetType === 'profile' ? 'var(--accent)' : 'transparent',
+                            color: targetType === 'profile' ? 'white' : 'var(--text-secondary)',
+                            transition: 'all 0.2s',
+                        }}
+                    >👤 Trang cá nhân</button>
+                </div>
+
                 {/* Form Controls */}
                 <div className="form-grid">
                     <div className="form-group full-width">
-                        <label>Group ID</label>
-                        <input type="text" value={groupId} onChange={e => { setGroupId(e.target.value); localStorage.setItem('fb_groupId', e.target.value); }} placeholder="Ví dụ: 1234567890" />
+                        <label>{targetType === 'profile' ? 'Profile ID / URL' : 'Group ID'}</label>
+                        <input 
+                            type="text" 
+                            value={groupId} 
+                            onChange={e => { setGroupId(e.target.value); localStorage.setItem('fb_groupId', e.target.value); }} 
+                            placeholder={targetType === 'profile' ? 'Ví dụ: 100012345 hoặc facebook.com/johndoe' : 'Ví dụ: 1234567890'} 
+                        />
                     </div>
                     <div className="form-group">
                         <label>Từ ngày</label>
@@ -224,7 +253,7 @@ export const FacebookPage: React.FC = () => {
                     <h3 style={{ margin: 0, fontSize: '16px', whiteSpace: 'nowrap' }}>Dữ liệu thu thập được</h3>
                     
                     {/* Group Filter Dropdown */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{ position: 'relative', width: '250px' }}>
                             <input 
                                 type="text" 
@@ -348,7 +377,7 @@ export const FacebookPage: React.FC = () => {
                                                     {post.permalink_url && <a href={post.permalink_url} target="_blank" style={{ fontSize: '12px', color: 'var(--accent)', textDecoration: 'none' }}>Xem bài viết gốc ↗</a>}
                                                 </td>
                                                 <td style={{ padding: '16px 24px', verticalAlign: 'top', fontWeight: 'bold', color: 'var(--text-primary)' }}>
-                                                    <div style={{ marginBottom: '4px' }}>👍 {post.reaction_count || 0}</div>
+                                                    👍 {post.reaction_count || 0}
                                                 </td>
                                                 <td style={{ padding: '16px 24px', verticalAlign: 'top' }}>
                                                     {(() => {
@@ -456,7 +485,15 @@ export const FacebookPage: React.FC = () => {
                 {/* Floating Action Bar */}
                 <div className={`fab-bar ${selectedPosts.size > 0 ? 'visible' : ''}`}>
                     <span className="fab-count">✅ {selectedPosts.size} bài đã chọn</span>
-                    <button className="fab-btn" onClick={bulkRefresh}>🔄 Làm mới</button>
+                    <button 
+                        className="fab-btn" 
+                        disabled={feedCrawling}
+                        style={feedCrawling ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
+                        onClick={bulkRefresh}
+                        title={feedCrawling ? "Đang xử lý làm mới..." : "Làm mới lượt tương tác, bình luận và trạng thái các bài đã chọn"}
+                    >
+                        {feedCrawling ? '⏳ Đang làm mới...' : '🔄 Làm mới'}
+                    </button>
                     <button className="fab-btn" onClick={bulkCheckStatus}>🔍 Kiểm tra</button>
                     <button 
                         className="fab-btn primary" 

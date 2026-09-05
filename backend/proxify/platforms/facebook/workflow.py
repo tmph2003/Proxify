@@ -80,6 +80,24 @@ class CrawlCommentCommand(BaseCommand):
         )
 
 
+class CrawlProfileFeedCommand(BaseCommand):
+    """Lệnh cào bảng tin trang cá nhân Facebook theo khoảng thời gian."""
+    def __init__(self, receiver, profile_id: str, start_ts: int, end_ts: int,
+                 template: dict = None, client_cookie: str = None):
+        self.receiver = receiver
+        self.profile_id = profile_id
+        self.start_ts = start_ts
+        self.end_ts = end_ts
+        self.template = template
+        self.client_cookie = client_cookie
+
+    async def execute(self):
+        logger.info(f"[Command] Executing CrawlProfileFeedCommand for profile {self.profile_id}")
+        await self.receiver._execute_crawl_profile_feed(
+            self.profile_id, self.start_ts, self.end_ts, self.template, self.client_cookie
+        )
+
+
 # ─── 2. Observer Pattern (Giám Sát Trạng Thái & Tiến Độ) ──────────────────────
 
 class CrawlerStateObserver:

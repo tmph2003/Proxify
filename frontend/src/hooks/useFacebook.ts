@@ -187,7 +187,7 @@ export const useFacebook = () => {
         }
     }, [page, limit, sort, order, groupIdFilter, groupNameFilter, statusFilter, startDateFilter, endDateFilter]);
 
-    const startCrawl = async (groupId: string, startDate: string, endDate: string) => {
+    const startCrawl = async (groupId: string, startDate: string, endDate: string, targetType: string = 'group') => {
         if (isCommentCrawling) {
             alert('⚠️ Đang có tiến trình cào bình luận (Comment) đang chạy. Không thể cào bài viết cùng lúc. Vui lòng chờ hoàn tất.');
             return;
@@ -198,16 +198,22 @@ export const useFacebook = () => {
             return;
         }
         if (!groupId) {
-            setStatusText('Vui lòng nhập Group ID!');
+            const label = targetType === 'profile' ? 'Profile ID / URL' : 'Group ID';
+            setStatusText(`Vui lòng nhập ${label}!`);
             return;
         }
         try {
             setCrawling(true);
             sessionStorage.setItem('fb_is_crawling', 'true');
-            setStatusText('Đang khởi tạo crawler...');
-            sessionStorage.setItem('fb_statusText', 'Đang khởi tạo crawler...');
+            const initMsg = targetType === 'profile' 
+                ? 'Đang khởi tạo crawler trang cá nhân...' 
+                : 'Đang khởi tạo crawler...';
+            setStatusText(initMsg);
+            sessionStorage.setItem('fb_statusText', initMsg);
             await api.post('/facebook/crawl', {
-                group_id: groupId,
+                target_type: targetType,
+                target_id: groupId,
+                group_id: groupId,  // backward compat
                 start_date: startDate,
                 end_date: endDate,
                 cookie: activeCookie
@@ -506,7 +512,7 @@ export const useFacebook = () => {
 
     return {
         crawling, data, statusText, statusColor, toastMessage, cookie, saveCookie,
-        startCrawl, stopCrawl, loadData,
+        startCrawl, stopCrawl, loadData, fetchGroups,
         page, setPage, limit, setLimit, total,
         sort, order, changeSort,
         groups, groupIdFilter, groupNameFilter, selectGroup,
