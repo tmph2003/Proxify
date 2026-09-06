@@ -1,10 +1,33 @@
 import asyncio
 import logging
 from typing import Dict, List, Set, Optional, Tuple
+from urllib.parse import urlparse
 from mitmproxy import http
 from proxify.core.interfaces import IObserverInterceptor, IMutatorInterceptor
 
 logger = logging.getLogger("proxify.core.router")
+
+# Static extensions that should be streamed directly to the browser
+# instead of being buffered in mitmproxy's RAM.
+# Buffering these adds latency (store-and-forward) and wastes memory.
+_STREAM_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".avif",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".mp4", ".mp3", ".wav", ".ogg", ".webm", ".avi", ".mkv", ".flv",
+    ".map",  # source maps
+)
+
+# Content-types that are safe to stream (no plugin ever modifies these)
+_STREAM_CONTENT_TYPES = ("image/", "font/", "application/font", "application/x-font")
+
+# Domains whose responses should ALWAYS be streamed (video CDNs, etc.)
+# These domains serve large binary data that must never be buffered.
+_STREAM_DOMAINS = (
+    "googlevideo.com",
+    "tiktokcdn.com",
+    "byteoversea.com",
+    "ibyteimg.com",
+)
 
 class TrieNode:
     def __init__(self):
@@ -101,18 +124,43 @@ class ProxyRouter:
 
     async def route_responseheaders(self, flow: http.HTTPFlow) -> None:
         """Route response headers to appropriate interceptors. Useful for stream bypassing."""
-        # Built-in OOM protection: automatically stream large media files
         content_type = flow.response.headers.get("content-type", "").lower()
+
+        # 1. Stream large media by content-type (OOM protection)
         if "video/" in content_type or "audio/" in content_type:
             flow.response.stream = True
             return
-            
+
+        # 2. Stream oversized responses (OOM protection)
         content_length = int(flow.response.headers.get("content-length", 0))
-        if content_length > 5 * 1024 * 1024: # > 5MB
+        if content_length > 5 * 1024 * 1024:  # > 5MB
             flow.response.stream = True
             return
 
+        # 3. Stream static assets by content-type (images, fonts)
+        #    No plugin ever modifies these — buffering them only adds latency.
+        if any(content_type.startswith(ct) for ct in _STREAM_CONTENT_TYPES):
+            flow.response.stream = True
+            return
+
+        # 4. Stream static assets by URL extension (images, fonts, source maps, media)
+        #    NOTE: .css and .js are intentionally EXCLUDED because mutator plugins
+        #    (e.g., ZaloPlugin) may need to read and modify the response body.
+        path = urlparse(flow.request.pretty_url).path.lower()
+        if path.endswith(_STREAM_EXTENSIONS):
+            flow.response.stream = True
+            return
+
+        # 5. Stream known video CDN domains unconditionally
+        #    googlevideo.com serves YouTube video chunks with content-type
+        #    "application/octet-stream" and chunked transfer encoding (no content-length).
+        #    This bypasses both the video/ content-type check and the >5MB size check.
+        #    Without streaming, mitmproxy buffers the entire video in RAM → hang.
         host = flow.request.pretty_host
+        if any(d in host for d in _STREAM_DOMAINS):
+            flow.response.stream = True
+            return
+
         if self.is_ignored(host):
             return
         observers, mutators = self._search(host)
@@ -124,6 +172,7 @@ class ProxyRouter:
         for mut in mutators:
             if hasattr(mut, 'handle_responseheaders'):
                 await mut.handle_responseheaders(flow)
+
 
     async def route_response(self, flow: http.HTTPFlow) -> None:
         """Route response to appropriate interceptors."""

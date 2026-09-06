@@ -8,6 +8,9 @@ services:
       # Ánh xạ port proxy (8080) ra máy host
       - "8080:8080"
       - "51920:51820/udp"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - PROXY_HOST=0.0.0.0
       - PROXY_PORT=8080
@@ -16,7 +19,7 @@ services:
       - COMMIT_INTERVAL=2.0
       - DUMP_DIR=dumps
       - SPOOF_DOMAINS=${SPOOF_DOMAINS:-tiktok.com,tiktokv.com,byteoversea.com,tiktokcdn.com,zalo.me,chat.zalo.me,zalo.vn,zalopay.vn,zaloapp.com}
-      - IGNORE_HOSTS=${IGNORE_HOSTS:-trino.sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com}
+      - IGNORE_HOSTS=${IGNORE_HOSTS:-trino.sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com}
       - DB_DSN=postgresql://proxify_user:proxify_pass@db:5432/proxify_db
       - DB_INTEGRATION_ENABLED=true
     command: ["python", "-m", "proxify"]

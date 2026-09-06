@@ -113,7 +113,10 @@ async def run_server():
 
     # 2.5 Parse ignored hosts
     import re
-    raw_ignore = os.getenv("IGNORE_HOSTS", "trino.sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com")
+    raw_ignore = os.getenv(
+        "IGNORE_HOSTS",
+        "trino.sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com",
+    )
     ignored_hosts = [h.strip() for h in raw_ignore.split(",") if h.strip()]
     ignore_patterns = [re.escape(h) for h in ignored_hosts]
     logger.info(f"🚫 Ignored Hosts (Passthrough): {ignored_hosts}")
@@ -136,7 +139,7 @@ async def run_server():
         listen_host="0.0.0.0",
         listen_port=proxy_port,
         ssl_insecure=True,
-        http2=False,
+        http2=True,
         ignore_hosts=ignore_patterns,
     )
     master = DumpMaster(opts, with_termlog=True, with_dumper=False)
@@ -150,11 +153,21 @@ async def run_server():
     try:
         from proxify.plugins.youtube import YouTubePlugin
         yt_plugin = YouTubePlugin(event_bus)
-        for domain in yt_plugin.target_domains:
-            router._insert(domain, yt_plugin, True)
+        # youtube.com needs body modification (strip ads from API responses)
+        # → register as MUTATOR
+        _yt_mutator_domains = {"youtube.com", "youtubei"}
+        # googlevideo.com is pure video CDN, doubleclick.net is ad tracking
+        # → only need request-level blocking (observer), NEVER modify response body
+        # If registered as mutator, mitmproxy buffers the ENTIRE video stream → hang
+        _yt_observer_domains = {"googlevideo.com", "doubleclick.net"}
+        for domain in _yt_mutator_domains:
+            router._insert(domain, yt_plugin, True)   # mutator
+        for domain in _yt_observer_domains:
+            router._insert(domain, yt_plugin, False)   # observer only
         logger.info("📺 YouTube Plugin ENABLED in v2")
     except Exception as e:
         logger.error(f"Failed to load YouTube plugin: {e}")
+
 
     # 4.5. Initialize V1 RequestStorage and Global Observer
     from proxify.core.traffic_storage import RequestStorage
