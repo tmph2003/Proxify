@@ -115,7 +115,7 @@ async def run_server():
     import re
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "trino.sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com",
+        "sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com",
     )
     ignored_hosts = [h.strip() for h in raw_ignore.split(",") if h.strip()]
     ignore_patterns = [re.escape(h) for h in ignored_hosts]
