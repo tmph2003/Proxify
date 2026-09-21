@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Proxify Cookie Helper",
-  "version": "1.0",
-  "description": "Lấy cookie Facebook 1 chạm cho Proxify",
+  "name": "Proxify Helper",
+  "version": "1.1",
+  "description": "Proxify browser helper — Facebook cookie extraction & YouTube anti-AFK",
   "permissions": [
     "cookies",
     "activeTab",
@@ -20,6 +20,11 @@
     {
       "matches": ["*://*.facebook.com/*", "*://facebook.com/*"],
       "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["youtube_anti_afk.js"],
       "run_at": "document_idle"
     }
   ],

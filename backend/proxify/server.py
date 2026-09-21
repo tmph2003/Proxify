@@ -115,7 +115,7 @@ async def run_server():
     import re
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "sunhouse.com.vn,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com",
+        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com",
     )
     ignored_hosts = [h.strip() for h in raw_ignore.split(",") if h.strip()]
     ignore_patterns = [re.escape(h) for h in ignored_hosts]
@@ -153,18 +153,23 @@ async def run_server():
     try:
         from proxify.plugins.youtube import YouTubePlugin
         yt_plugin = YouTubePlugin(event_bus)
-        # youtube.com needs body modification (strip ads from API responses)
-        # → register as MUTATOR
-        _yt_mutator_domains = {"youtube.com", "youtubei"}
-        # googlevideo.com is pure video CDN, doubleclick.net is ad tracking
-        # → only need request-level blocking (observer), NEVER modify response body
-        # If registered as mutator, mitmproxy buffers the ENTIRE video stream → hang
-        _yt_observer_domains = {"googlevideo.com", "doubleclick.net"}
+        # Register YouTube and Google ad domains as MUTATOR:
+        # 1. On request: Synchronously intercept ad networks (doubleclick, googlesyndication,
+        #    googleadservices, adservice) and ad endpoints with HTTP 204 No Content.
+        #    Must be a mutator so route_request awaits it instead of fire-and-forget background task.
+        # 2. On response: Strip ad configurations from watch/shorts HTML and Innertube JSON.
+        # Note: googlevideo.com is handled in router._STREAM_DOMAINS for direct media streaming.
+        _yt_mutator_domains = {
+            "youtube.com",
+            "youtubei",
+            "doubleclick.net",
+            "googlesyndication.com",
+            "googleadservices.com",
+            "adservice.google.com",
+        }
         for domain in _yt_mutator_domains:
             router._insert(domain, yt_plugin, True)   # mutator
-        for domain in _yt_observer_domains:
-            router._insert(domain, yt_plugin, False)   # observer only
-        logger.info("📺 YouTube Plugin ENABLED in v2")
+        logger.info("📺 YouTube Plugin ENABLED in v2 (Mutator on ad & video domains)")
     except Exception as e:
         logger.error(f"Failed to load YouTube plugin: {e}")
 
