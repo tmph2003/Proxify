@@ -107,6 +107,19 @@ class V1GlobalObserver:
         ):
             return
 
+        # Skip noisy high-frequency polling and telemetry endpoints from DB storage and WebSocket broadcast
+        path = (flow.request.path or "").lower()
+        if any(path.startswith(prefix) for prefix in (
+            "/api/stats/",
+            "/youtubei/v1/live_chat/",
+            "/youtubei/v1/updated_metadata",
+            "/youtubei/v1/log_event",
+            "/punctual/",
+            "/generate_204",
+            "/ptracking",
+        )):
+            return
+
         # Determine whether DB save is allowed based on V1 storage settings
         db_save = getattr(self.db_writer.storage, 'db_integration_enabled', False)
         if db_save:
@@ -144,7 +157,7 @@ async def run_server():
     import re
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,c.youtube.com,google.com,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*",
+        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,c.youtube.com,signaler-pa.youtube.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*",
     )
     ignored_hosts = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in raw_ignore.split(",") if h.strip()]
     ignore_patterns = []
