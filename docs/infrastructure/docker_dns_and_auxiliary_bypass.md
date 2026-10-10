@@ -4,14 +4,14 @@
 - **Hạ tầng Docker (`docker-compose.yml`)**:
   - Bổ sung cấu hình DNS công cộng tường minh (`8.8.8.8`, `1.1.1.1`) cho service `proxify_app`, tách đứt việc kế thừa DNS trung gian của WSL2 (`192.168.65.7`).
   - Khai báo ánh xạ tĩnh `extra_hosts` cho toàn bộ các domain nội bộ Sunhouse (`ks.sunhouse.com.vn`, `erp.sunhouse.com.vn`, `git.sunhouse.com.vn`, `trino.sunhouse.com.vn`, `bi.sunhouse.com.vn`, `jira.sunhouse.com.vn`, `sso.sunhouse.com.vn`, `minio.sunhouse.com.vn`) trỏ thẳng tới IP máy chủ nội bộ (`172.16.100.130`, `172.16.100.183`, `172.16.100.129`).
-  - Mở rộng `IGNORE_HOSTS` với các domain dịch vụ phụ trợ: `accounts.youtube.com`, `gvt1.com`, `gvt3.com`, `fastly-edge.com`, `play.google.com`.
+  - Mở rộng `IGNORE_HOSTS` với các domain dịch vụ phụ trợ và lưu lượng lướt web ngoài mục tiêu can thiệp: `accounts.youtube.com`, `gvt1.com`, `gvt3.com`, `fastly-edge.com`, `play.google.com`, `googleusercontent.com`, `google.com.vn`, `chatgpt.com`, `openai.com`, `apple.com`, `vscode-cdn.net`, `exp-tas.com`, `gravatar.com`.
 - **Lõi Proxy (`backend/proxify/server.py`)**:
   - Tại hook `responseheaders` và `response` của `ProxyAddon`, chủ động xóa bỏ header `Alt-Svc` (`del flow.response.headers["alt-svc"]`) đối với tất cả các luồng dữ liệu đi qua proxy.
   - Đồng bộ danh sách fallback `IGNORE_HOSTS` khớp hoàn toàn với `docker-compose.yml`.
 - **Extension YouTube Enhancer (`backend/extensions/youtube/plugin.py`)**:
   - Triệt tiêu dứt điểm header `Alt-Svc` trên toàn bộ response trả về từ YouTube (`youtube.com` và `youtubei.googleapis.com`).
 - **Hệ thống Host Windows (WinINet & WinHTTP)**:
-  - Cập nhật registry `ProxyOverride` và đồng bộ sang WinHTTP (`netsh winhttp import proxy source=ie`) cho các domain phụ trợ mới (`*.gvt1.com;*.gvt3.com;accounts.youtube.com;*.fastly-edge.com;play.google.com`).
+  - Cập nhật registry `ProxyOverride` và đồng bộ sang WinHTTP (`netsh winhttp import proxy source=ie`) cho toàn bộ các domain ngoài mục tiêu (`*.googleusercontent.com;*.google.com.vn;*.chatgpt.com;*.openai.com;*.apple.com;*.vscode-cdn.net;*.exp-tas.com`).
   - Kích hoạt thông báo WinINet `InternetSetOption` (options 39 và 37) để áp dụng ngay lập tức cho toàn bộ tiến trình mạng Windows.
 
 ---
