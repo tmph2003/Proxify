@@ -99,7 +99,12 @@ class V1GlobalObserver:
             return
         raw_host = flow.request.pretty_host or ""
         domain = raw_host.split(":", 1)[0].strip().lower()
-        if any(domain == h or domain.endswith('.' + h) for h in self.ignored_hosts):
+        if any(
+            domain == h 
+            or domain.endswith('.' + h) 
+            or (h.endswith('*') and domain.startswith(h.rstrip('*')))
+            for h in self.ignored_hosts
+        ):
             return
 
         # Determine whether DB save is allowed based on V1 storage settings
@@ -139,10 +144,16 @@ async def run_server():
     import re
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,google.com,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn",
+        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,google.com,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*",
     )
     ignored_hosts = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in raw_ignore.split(",") if h.strip()]
-    ignore_patterns = [rf"(?:^|\.){re.escape(h)}(?::|$)" for h in ignored_hosts]
+    ignore_patterns = []
+    for h in ignored_hosts:
+        if h.endswith("*"):
+            prefix = h.rstrip("*")
+            ignore_patterns.append(rf"^{re.escape(prefix)}.*")
+        else:
+            ignore_patterns.append(rf"(?:^|\.){re.escape(h)}(?::|$)")
     logger.info(f"🚫 Ignored Hosts (Passthrough): {ignored_hosts}")
 
     # 3. Initialize Router
