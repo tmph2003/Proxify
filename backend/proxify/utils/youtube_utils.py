@@ -60,9 +60,9 @@ def is_youtube_ad_request(url: str, domain: str) -> bool:
     if not is_yt and "youtubei" not in url_lower:
         return False
 
-    # 2. Never block googlevideo.com stream chunks at the request level.
+    # 2. Never block googlevideo.com or c.youtube.com stream chunks at the request level.
     # Blocking video stream chunks breaks MediaSource MSE and causes fatal player errors.
-    if clean_domain == "googlevideo.com" or clean_domain.endswith(".googlevideo.com"):
+    if any(clean_domain == d or clean_domain.endswith('.' + d) for d in ("googlevideo.com", "c.youtube.com")):
         return False
 
     # 3. Google/YouTube PageAd endpoints
@@ -288,7 +288,7 @@ YOUTUBE_WATCHDOG_SCRIPT = (
     """if(t==="có"||t==="yes"||t==="ok"||t.indexOf("tiếp tục")!==-1||t.indexOf("continue")!==-1||a==="có"||a==="yes"||a.indexOf("continue")!==-1){"""
     """el.click();return true;}}return false;}"""
     """function resumeVideo(){try{var v=document.querySelector("video.html5-main-video")||document.querySelector("video");"""
-    """if(v&&v.paused){var p=v.play();if(p&&p.catch){p.catch(function(){"""
+    """if(v&&v.paused&&v.readyState>=2){var p=v.play();if(p&&p.catch){p.catch(function(){"""
     """var mp=document.getElementById("movie_player");if(mp&&typeof mp.playVideo==="function"){mp.playVideo();}});}}}catch(e){}}"""
     """function checkAndDismiss(){var dlgs=document.querySelectorAll("yt-confirm-dialog-renderer, tp-yt-paper-dialog, ytmusic-you-there-renderer, ytd-modal-with-title-and-button-renderer");"""
     """for(var i=0;i<dlgs.length;i++){var d=dlgs[i];var s=window.getComputedStyle(d);"""
