@@ -39,13 +39,27 @@ class Dashboard:
         self.app.router.add_get("/api/export/{format}", self._handle_export)
         self.app.router.add_delete("/api/requests", self._handle_delete_requests)
         self.app.router.add_post("/api/toggle_db", self._handle_toggle_db)
+        self.app.router.add_get("/api/health", self._handle_health)
+        self.app.router.add_get("/api/status", self._handle_health)
         self.app.router.add_get("/api/config", self._handle_get_config)
         # Server UI is now handled by Nginx completely.
         # We only keep the API endpoints here.
         # All SPA routing is now handled by Nginx.
 
+    async def _handle_health(self, request: web.Request) -> web.Response:
+        return web.json_response({
+            "status": "healthy",
+            "service": "proxify",
+            "port": self.port,
+            "db_integration_enabled": getattr(self.storage, 'db_integration_enabled', False),
+        })
+
     async def _handle_toggle_db(self, request: web.Request) -> web.Response:
-        data = await request.json()
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+
         if "enabled" in data:
             self.storage.db_integration_enabled = data["enabled"]
             logger.info(f"DB Integration {'ENABLED' if data['enabled'] else 'DISABLED'}")

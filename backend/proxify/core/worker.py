@@ -46,6 +46,9 @@ class BackgroundWorker:
             await asyncio.sleep(2.0)
 
     async def _process_batch(self):
+        if not self.db_manager.pool or getattr(self.db_manager.pool, '_closed', False):
+            return
+
         # Fetch up to 100 unprocessed payloads
         async with self.db_manager.pool.acquire() as conn:
             records = await conn.fetch("""

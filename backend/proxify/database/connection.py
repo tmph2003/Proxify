@@ -31,7 +31,7 @@ class DatabasePool:
 
     def _ensure_pool(self) -> pool.ThreadedConnectionPool | None:
         """Lazily create the connection pool."""
-        if self._pool is None:
+        if self._pool is None or getattr(self._pool, 'closed', False):
             try:
                 self._pool = pool.ThreadedConnectionPool(
                     minconn=self._min_conn,
@@ -51,10 +51,17 @@ class DatabasePool:
             return None
         try:
             conn = p.getconn()
+            if getattr(conn, 'closed', 0) != 0:
+                try:
+                    p.putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = p.getconn()
             conn.autocommit = True
             return conn
         except Exception as e:
             logger.error(f"[DB] Error getting connection: {e}")
+            self.close()
             return None
 
     def release_connection(self, conn):
@@ -62,7 +69,8 @@ class DatabasePool:
         p = self._ensure_pool()
         if p and conn:
             try:
-                p.putconn(conn)
+                is_closed = bool(getattr(conn, 'closed', 0) != 0)
+                p.putconn(conn, close=is_closed)
             except Exception:
                 pass
 

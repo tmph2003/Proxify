@@ -35,6 +35,7 @@ class PollingEndpointFilter(logging.Filter):
     DEFAULT_IGNORED_PATHS = {
         "/api/stats",
         "/api/status",
+        "/api/health",
         "/ws",
     }
 
@@ -63,13 +64,22 @@ class ProxyAddon:
         self.router = router
 
     async def request(self, flow):
-        await self.router.route_request(flow)
+        try:
+            await self.router.route_request(flow)
+        except Exception as e:
+            logger.error(f"Error in ProxyAddon.request: {e}", exc_info=True)
 
     async def responseheaders(self, flow):
-        await self.router.route_responseheaders(flow)
+        try:
+            await self.router.route_responseheaders(flow)
+        except Exception as e:
+            logger.error(f"Error in ProxyAddon.responseheaders: {e}", exc_info=True)
 
     async def response(self, flow):
-        await self.router.route_response(flow)
+        try:
+            await self.router.route_response(flow)
+        except Exception as e:
+            logger.error(f"Error in ProxyAddon.response: {e}", exc_info=True)
 
 class V1GlobalObserver:
     """Wraps V1 interceptors to bridge mitmproxy flows to the legacy Global Dashboard."""
@@ -85,8 +95,11 @@ class V1GlobalObserver:
         pass
         
     async def handle_response(self, flow):
-        domain = (flow.request.pretty_host or "").lower()
-        if any(h in domain for h in self.ignored_hosts):
+        if not flow or not flow.request or not flow.response:
+            return
+        raw_host = flow.request.pretty_host or ""
+        domain = raw_host.split(":", 1)[0].strip().lower()
+        if any(domain == h or domain.endswith('.' + h) for h in self.ignored_hosts):
             return
 
         # Determine whether DB save is allowed based on V1 storage settings
@@ -94,7 +107,7 @@ class V1GlobalObserver:
         if db_save:
             allowed_domains = getattr(self.db_writer.storage, 'db_allowed_domains', [])
             if allowed_domains:
-                if not any(d in domain for d in allowed_domains):
+                if not any(domain == d or domain.endswith('.' + d) for d in allowed_domains):
                     db_save = False
 
         self.broadcaster(flow, db_save=db_save)
@@ -126,10 +139,10 @@ async def run_server():
     import re
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zalo.me,chat.zalo.me,zaloapp.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com",
+        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com",
     )
-    ignored_hosts = [h.strip() for h in raw_ignore.split(",") if h.strip()]
-    ignore_patterns = [re.escape(h) for h in ignored_hosts]
+    ignored_hosts = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in raw_ignore.split(",") if h.strip()]
+    ignore_patterns = [rf"(?:^|\.){re.escape(h)}(?::|$)" for h in ignored_hosts]
     logger.info(f"🚫 Ignored Hosts (Passthrough): {ignored_hosts}")
 
     # 3. Initialize Router

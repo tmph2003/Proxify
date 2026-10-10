@@ -90,7 +90,11 @@ class ExtensionContext:
         If `domains` is provided, it configures or overrides `observer.target_domains`.
         """
         if domains is not None:
-            observer.target_domains = set(domains)
+            existing = getattr(observer, "target_domains", None)
+            if existing and isinstance(existing, (set, list, tuple)):
+                observer.target_domains = set(existing) | set(domains)
+            else:
+                observer.target_domains = set(domains)
         self._router.register_observer(observer)
         logger.debug(f"[{self.extension_id}] Registered observer: {observer.__class__.__name__}")
 
@@ -106,7 +110,11 @@ class ExtensionContext:
         request/response headers and bodies, or short-circuit responses.
         """
         if domains is not None:
-            mutator.target_domains = set(domains)
+            existing = getattr(mutator, "target_domains", None)
+            if existing and isinstance(existing, (set, list, tuple)):
+                mutator.target_domains = set(existing) | set(domains)
+            else:
+                mutator.target_domains = set(domains)
         self._router.register_mutator(mutator)
         logger.debug(f"[{self.extension_id}] Registered mutator: {mutator.__class__.__name__}")
 

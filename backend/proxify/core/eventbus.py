@@ -83,7 +83,11 @@ class AsyncEventBus:
         """Performs a bulk insert of the batch into the raw_payloads table."""
         if not batch:
             return
-            
+
+        if not self.db_pool or getattr(self.db_pool, '_closed', False):
+            logger.warning("Database pool is closed or unavailable. Skipping bulk insert.")
+            return
+
         try:
             import json
             # Prepare records for asyncpg (must match columns: topic, data, created_at)

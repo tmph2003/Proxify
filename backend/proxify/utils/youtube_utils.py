@@ -49,18 +49,20 @@ def is_youtube_ad_request(url: str, domain: str) -> bool:
     """Check if the current HTTP flow matches known YouTube ad or tracking patterns."""
     domain_lower = domain.lower() if domain else ""
     url_lower = url.lower() if url else ""
+    clean_domain = domain_lower.split(":", 1)[0].strip()
 
     # 1. Direct ad networks
-    if any(ad_d in domain_lower for ad_d in AD_DOMAINS):
+    if any(clean_domain == ad_d or clean_domain.endswith('.' + ad_d) for ad_d in AD_DOMAINS):
         return True
 
     # Fast exit for non-YouTube / non-Innertube domains
-    if "youtube.com" not in domain_lower and "youtubei" not in url_lower:
+    is_yt = clean_domain == "youtube.com" or clean_domain.endswith(".youtube.com")
+    if not is_yt and "youtubei" not in url_lower:
         return False
 
     # 2. Never block googlevideo.com stream chunks at the request level.
     # Blocking video stream chunks breaks MediaSource MSE and causes fatal player errors.
-    if "googlevideo.com" in domain_lower:
+    if clean_domain == "googlevideo.com" or clean_domain.endswith(".googlevideo.com"):
         return False
 
     # 3. Google/YouTube PageAd endpoints

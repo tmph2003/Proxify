@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   proxify:
     build: ./backend
@@ -16,7 +14,7 @@ services:
       - COMMIT_INTERVAL=2.0
       - DUMP_DIR=dumps
       - SPOOF_DOMAINS=${SPOOF_DOMAINS:-tiktok.com,tiktokv.com,byteoversea.com,tiktokcdn.com,zalo.me,chat.zalo.me,zalo.vn,zalopay.vn,zaloapp.com}
-      - IGNORE_HOSTS=captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zalo.me,chat.zalo.me,zaloapp.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com
+      - IGNORE_HOSTS=captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com
       - DB_DSN=postgresql://proxify_user:proxify_pass@db:5432/proxify_db
       - DB_INTEGRATION_ENABLED=true
       - RECORD_RETENTION_DAYS=${RECORD_RETENTION_DAYS:-7}
@@ -24,6 +22,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s1 = socket.socket(); s1.connect(('127.0.0.1', 8080)); s1.close(); s2 = socket.socket(); s2.connect(('127.0.0.1', 8888)); s2.close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
     volumes:
       - ~/.mitmproxy:/root/.mitmproxy
@@ -37,7 +41,14 @@ services:
       # UI Dashboard sẽ nghe trên port 8888 của máy host (Nginx -> React SPA)
       - "8888:80"
     depends_on:
-      - proxify
+      proxify:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
 
   db:

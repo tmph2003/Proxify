@@ -1,3 +1,4 @@
+import asyncio
 import asyncpg
 import logging
 import os
@@ -10,21 +11,30 @@ class DatabaseManager:
     def __init__(self):
         self.pool: Optional[asyncpg.Pool] = None
         
-    async def connect(self, dsn: str, min_size: int = 5, max_size: int = 20):
-        """Initializes the asyncpg connection pool."""
+    async def connect(self, dsn: str, min_size: int = 5, max_size: int = 20, max_retries: int = 5, retry_interval: float = 2.0):
+        """Initializes the asyncpg connection pool with auto-recovery retries."""
         logger.info(f"Connecting to Database pool (min={min_size}, max={max_size})...")
-        self.pool = await asyncpg.create_pool(
-            dsn=dsn,
-            min_size=min_size,
-            max_size=max_size,
-            command_timeout=60,
-            server_settings={
-                'application_name': 'proxify_core',
-                'timezone': 'UTC'
-            }
-        )
-        await self._init_core_schema()
-        logger.info("Database pool established and core schema verified.")
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.pool = await asyncpg.create_pool(
+                    dsn=dsn,
+                    min_size=min_size,
+                    max_size=max_size,
+                    command_timeout=60,
+                    server_settings={
+                        'application_name': 'proxify_core',
+                        'timezone': 'UTC'
+                    }
+                )
+                await self._init_core_schema()
+                logger.info("Database pool established and core schema verified.")
+                return
+            except Exception as e:
+                logger.warning(f"Database connection attempt {attempt}/{max_retries} failed: {e}")
+                if attempt < max_retries:
+                    await asyncio.sleep(retry_interval)
+                else:
+                    raise
         
     async def disconnect(self):
         """Closes the connection pool."""

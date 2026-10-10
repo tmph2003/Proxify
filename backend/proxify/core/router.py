@@ -46,27 +46,34 @@ class ProxyRouter:
         self.root = TrieNode()
         self.global_observers: List[IObserverInterceptor] = []
         self.global_mutators: List[IMutatorInterceptor] = []
-        self.ignored_hosts: List[str] = [h.strip().lower() for h in (ignored_hosts or []) if h.strip()]
-        self.stream_domains: Set[str] = set(_STREAM_DOMAINS)
+        self.ignored_hosts: List[str] = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in (ignored_hosts or []) if h.strip()]
+        self.stream_domains: Set[str] = {d.split(":", 1)[0].strip().lower() for d in _STREAM_DOMAINS}
 
     def register_stream_domains(self, domains) -> None:
-        self.stream_domains.update(d.lower() for d in domains if d)
+        self.stream_domains.update(d.split(":", 1)[0].strip().lower() for d in domains if d)
 
     def add_ignored_host(self, host: str) -> None:
-        if host and host.strip().lower() not in self.ignored_hosts:
-            self.ignored_hosts.append(host.strip().lower())
+        clean = host.strip().lstrip("*.").split(":", 1)[0].lower() if host else ""
+        if clean and clean not in self.ignored_hosts:
+            self.ignored_hosts.append(clean)
 
-    def is_ignored(self, host: str) -> bool:
+    def is_ignored(self, host: Optional[str]) -> bool:
         if not host or not self.ignored_hosts:
             return False
-        host_lower = host.lower()
-        return any(h in host_lower for h in self.ignored_hosts)
+        clean_host = host.split(":", 1)[0].strip().lower()
+        if not clean_host:
+            return False
+        return any(clean_host == h or clean_host.endswith('.' + h) for h in self.ignored_hosts)
 
     def _insert(self, domain: str, interceptor, is_mutator: bool):
         if not domain:
             return
         
-        parts = domain.lower().strip('.').split('.')
+        clean_domain = domain.split(":", 1)[0].strip().lstrip("*.").lower()
+        if not clean_domain:
+            return
+
+        parts = clean_domain.strip('.').split('.')
         parts.reverse() # com -> facebook -> api
         
         curr = self.root
@@ -94,13 +101,19 @@ class ProxyRouter:
         for domain in mutator.target_domains:
             self._insert(domain, mutator, True)
 
-    def _search(self, domain: str) -> Tuple[List[IObserverInterceptor], List[IMutatorInterceptor]]:
+    def _search(self, domain: Optional[str]) -> Tuple[List[IObserverInterceptor], List[IMutatorInterceptor]]:
         """Finds all interceptors matching the domain and its parent domains."""
-        parts = domain.lower().strip('.').split('.')
-        parts.reverse()
-        
         matched_observers = list(self.global_observers)
         matched_mutators = list(self.global_mutators)
+        if not domain:
+            return matched_observers, matched_mutators
+
+        clean_domain = domain.split(":", 1)[0].strip().lower()
+        if not clean_domain:
+            return matched_observers, matched_mutators
+
+        parts = clean_domain.strip('.').split('.')
+        parts.reverse()
         
         curr = self.root
         for part in parts:
@@ -111,29 +124,53 @@ class ProxyRouter:
             else:
                 break
                 
-        return matched_observers, matched_mutators
+        # Deduplicate while preserving traversal order
+        unique_observers = []
+        seen_obs = set()
+        for obs in matched_observers:
+            if obs not in seen_obs:
+                seen_obs.add(obs)
+                unique_observers.append(obs)
+
+        unique_mutators = []
+        seen_mut = set()
+        for mut in matched_mutators:
+            if mut not in seen_mut:
+                seen_mut.add(mut)
+                unique_mutators.append(mut)
+
+        return unique_observers, unique_mutators
 
     async def route_request(self, flow: http.HTTPFlow) -> None:
         """Route request to appropriate interceptors."""
-        host = flow.request.pretty_host
+        if not flow or not flow.request:
+            return
+        host = flow.request.pretty_host or ""
         if self.is_ignored(host):
             return
         observers, mutators = self._search(host)
         
         # 1. Fire and forget observers
         for obs in observers:
-            # We must NOT pass the raw flow if it's going to outlive the proxy pipeline.
-            # But asyncio.create_task on the same loop usually runs synchronously until the first await,
-            # which might be safe if observers just extract data synchronously and then await IO.
-            # For strict safety, observers must extract data synchronously in handle_request before yielding.
-            asyncio.create_task(obs.handle_request(flow))
+            async def _safe_obs_req(observer, f):
+                try:
+                    await observer.handle_request(f)
+                except Exception as e:
+                    logger.error(f"Observer error in handle_request for {host}: {e}", exc_info=True)
+            asyncio.create_task(_safe_obs_req(obs, flow))
             
         # 2. Await mutators sequentially
         for mut in mutators:
-            await mut.handle_request(flow)
+            try:
+                await mut.handle_request(flow)
+            except Exception as e:
+                logger.error(f"Mutator error in handle_request for {host}: {e}", exc_info=True)
 
     async def route_responseheaders(self, flow: http.HTTPFlow) -> None:
         """Route response headers to appropriate interceptors. Useful for stream bypassing."""
+        if not flow or not flow.request or not flow.response:
+            return
+
         content_type = flow.response.headers.get("content-type", "").lower()
 
         # 1. Stream large media by content-type (OOM protection)
@@ -142,7 +179,10 @@ class ProxyRouter:
             return
 
         # 2. Stream oversized responses (OOM protection)
-        content_length = int(flow.response.headers.get("content-length", 0))
+        try:
+            content_length = int(flow.response.headers.get("content-length", 0))
+        except (ValueError, TypeError):
+            content_length = 0
         if content_length > 5 * 1024 * 1024:  # > 5MB
             flow.response.stream = True
             return
@@ -156,7 +196,8 @@ class ProxyRouter:
         # 4. Stream static assets by URL extension (images, fonts, source maps, media)
         #    NOTE: .css and .js are intentionally EXCLUDED because mutator plugins
         #    (e.g., ZaloPlugin) may need to read and modify the response body.
-        path = urlparse(flow.request.pretty_url).path.lower()
+        url = flow.request.pretty_url or ""
+        path = urlparse(url).path.lower()
         if path.endswith(_STREAM_EXTENSIONS):
             flow.response.stream = True
             return
@@ -166,33 +207,52 @@ class ProxyRouter:
         #    "application/octet-stream" and chunked transfer encoding (no content-length).
         #    This bypasses both the video/ content-type check and the >5MB size check.
         #    Without streaming, mitmproxy buffers the entire video in RAM → hang.
-        host = flow.request.pretty_host
-        if any(d in host for d in self.stream_domains):
+        raw_host = flow.request.pretty_host or ""
+        clean_host = raw_host.split(":", 1)[0].strip().lower()
+        if any(clean_host == d or clean_host.endswith('.' + d) for d in self.stream_domains):
             flow.response.stream = True
             return
 
-        if self.is_ignored(host):
+        if self.is_ignored(raw_host):
             return
-        observers, mutators = self._search(host)
+        observers, mutators = self._search(raw_host)
         
         for obs in observers:
             if hasattr(obs, 'handle_responseheaders'):
-                asyncio.create_task(obs.handle_responseheaders(flow))
+                async def _safe_obs_headers(observer, f):
+                    try:
+                        await observer.handle_responseheaders(f)
+                    except Exception as e:
+                        logger.error(f"Observer error in handle_responseheaders for {raw_host}: {e}", exc_info=True)
+                asyncio.create_task(_safe_obs_headers(obs, flow))
             
         for mut in mutators:
             if hasattr(mut, 'handle_responseheaders'):
-                await mut.handle_responseheaders(flow)
+                try:
+                    await mut.handle_responseheaders(flow)
+                except Exception as e:
+                    logger.error(f"Mutator error in handle_responseheaders for {raw_host}: {e}", exc_info=True)
 
 
     async def route_response(self, flow: http.HTTPFlow) -> None:
         """Route response to appropriate interceptors."""
-        host = flow.request.pretty_host
+        if not flow or not flow.request or not flow.response:
+            return
+        host = flow.request.pretty_host or ""
         if self.is_ignored(host):
             return
         observers, mutators = self._search(host)
         
         for obs in observers:
-            asyncio.create_task(obs.handle_response(flow))
+            async def _safe_obs_resp(observer, f):
+                try:
+                    await observer.handle_response(f)
+                except Exception as e:
+                    logger.error(f"Observer error in handle_response for {host}: {e}", exc_info=True)
+            asyncio.create_task(_safe_obs_resp(obs, flow))
             
         for mut in mutators:
-            await mut.handle_response(flow)
+            try:
+                await mut.handle_response(flow)
+            except Exception as e:
+                logger.error(f"Mutator error in handle_response for {host}: {e}", exc_info=True)
