@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zalo Extractor — Quản lý nhóm</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/static/css/zalo.css">
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="topbar">
+    <a href="/" class="logo">
+        <img src="/assets/logo.png" alt="Logo" style="width: 20px; height: 20px; border-radius: 4px;">
+        Proxify
+    </a>
+    <div class="nav-links">
+        <a href="/" class="nav-link">📡 Requests</a>
+        <a href="/zalo" class="nav-link active-zalo">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="14" viewBox="0 0 40 20"><rect width="40" height="20" rx="4" fill="#0068ff"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-weight="bold" font-size="11">Zalo</text></svg>
+            Zalo Extractor
+        </a>
+        <a href="/facebook" class="nav-link">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.313h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z"/></svg>
+            Facebook Extractor
+        </a>
+    </div>
+    <div class="stats-bar">
+        <div class="stat">Nhóm: <span class="stat-value" id="statGroups">0</span></div>
+        <div class="stat">Người dùng: <span class="stat-value" id="statUsers">0</span></div>
+        <div class="stat">Liên kết: <span class="stat-value" id="statMemberships">0</span></div>
+    </div>
+</div>
+
+<!-- Main Container -->
+<div class="main-container">
+
+    <!-- Left Panel -->
+    <div class="left-panel">
+
+        <!-- Scan Input -->
+        <div class="scan-area">
+            <h3 style="margin: 0 0 8px;">QUÉT NHÓM</h3>
+            <div class="scan-input-group">
+                <input type="text" class="scan-input" id="scanInput" placeholder="Dán link nhóm Zalo hoặc Group ID..." onkeydown="if(event.key==='Enter')submitScan()">
+                <button class="scan-btn" id="scanBtn" onclick="submitScan()">
+                    🔍 Quét
+                </button>
+            </div>
+            <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted); line-height: 1.5;">
+                💡 Mở <a href="https://chat.zalo.me" target="_blank" style="color: var(--zalo-blue); text-decoration: none;">chat.zalo.me</a> trên Chrome (đang proxy) để tự động thu thập dữ liệu
+            </div>
+        </div>
+
+        <!-- Active Scan Jobs -->
+        <div class="jobs-section" id="jobsSection"></div>
+
+        <!-- Group List -->
+        <div class="group-list-header">
+            <h3>Danh sách nhóm</h3>
+            <input type="text" class="group-search" id="groupSearch" placeholder="Tìm nhóm..." oninput="loadGroups()">
+        </div>
+        <div class="group-list" id="groupList"></div>
+
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel" id="rightPanel">
+        <div class="empty-state" id="emptyState">
+            <div class="icon">💬</div>
+            <div class="text">Chọn một nhóm</div>
+            <div class="sub">Đang chờ tín hiệu...</div>
+        </div>
+
+        <!-- Group Detail (hidden by default) -->
+        <div id="groupDetail" style="display:none; flex:1; display:none; flex-direction:column; overflow:hidden;">
+            <div class="group-detail-header">
+                <div class="group-detail-avatar" id="detailAvatar">Z</div>
+                <div class="group-detail-info">
+                    <h2 id="detailName">—</h2>
+                    <div class="meta">
+                        <span id="detailMemberCount">0 thành viên</span>
+                        <span id="detailGroupId" style="font-family: 'JetBrains Mono', monospace;">—</span>
+                    </div>
+                </div>
+                <div class="group-detail-actions">
+                    <button class="action-btn primary" onclick="rescanGroup()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
+                        Lấy toàn bộ thành viên
+                    </button>
+                    <button class="action-btn" onclick="exportMembers('csv')">📥 CSV</button>
+                    <button class="action-btn" onclick="exportMembers('json')">📄 JSON</button>
+                </div>
+            </div>
+
+            <div class="member-toolbar">
+                <input type="text" class="member-search" id="memberSearch" placeholder="Tìm thành viên (tên, SĐT, ID)..." oninput="loadMembers()">
+                <span class="member-count-badge" id="memberCountBadge">0 kết quả</span>
+            </div>
+
+            <div class="member-table-wrap">
+                <table class="member-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;">#</th>
+                            <th>Tên</th>
+                            <th>Global ID</th>
+                            <th>Số điện thoại</th>
+                            <th>Cập nhật</th>
+                        </tr>
+                    </thead>
+                    <tbody id="memberTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+<script src="/static/js/zalo.js"></script>
+</body>
+</html>

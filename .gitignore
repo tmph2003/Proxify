@@ -1,0 +1,57 @@
+# Môi trường và biến cục bộ
+.env
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Thư mục dữ liệu và chứng chỉ cục bộ
+dumps/
+certs/
+
+# Thư mục cấu hình IDE
+.vscode/
+.idea/
+
+# Testing & Packaging
+.pytest_cache/
+.tox/
+.coverage
+build/
+dist/
+*.egg-info/
+
+# Ignore scratch tools
+tools/
+
+# Logs
+logs/
+*.log
+
+# IDE & AI Assistants
+.gemini/
+.codegraph/
+GEMINI.md
+
+scratchs/
+zalo_browser_data/
+
+# Git Worktrees
+.worktrees/
+
+# Private Extensions & Tools (Excluded from public open-core repo)
+backend/extensions/
+backend/CloakBrowser/
+old_crawler.py
+old_stealth.py
+frontend/src/pages/Facebook.tsx
+frontend/src/pages/Zalo.tsx
+frontend/src/hooks/useFacebook.ts
+frontend/src/hooks/useZalo.ts
+
+

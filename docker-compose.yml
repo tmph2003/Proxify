@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  proxify:
+    build: ./backend
+    container_name: proxify_app
+    ports:
+      # Ánh xạ port proxy (8080) ra máy host
+      - "8080:8080"
+      # - "51920:51820/udp" # Tạm tắt do trùng dải dynamic port exclusion của Windows Hyper-V
+    environment:
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=8080
+      - DASHBOARD_PORT=8888
+      - COMMIT_BATCH_SIZE=50
+      - COMMIT_INTERVAL=2.0
+      - DUMP_DIR=dumps
+      - SPOOF_DOMAINS=${SPOOF_DOMAINS:-tiktok.com,tiktokv.com,byteoversea.com,tiktokcdn.com,zalo.me,chat.zalo.me,zalo.vn,zalopay.vn,zaloapp.com}
+      - IGNORE_HOSTS=captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zalo.me,chat.zalo.me,zaloapp.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com
+      - DB_DSN=postgresql://proxify_user:proxify_pass@db:5432/proxify_db
+      - DB_INTEGRATION_ENABLED=true
+      - RECORD_RETENTION_DAYS=${RECORD_RETENTION_DAYS:-7}
+    command: ["python", "-m", "proxify"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ~/.mitmproxy:/root/.mitmproxy
+      - ./backend:/app
+      - ./backend/CloakBrowser:/app/CloakBrowser
+
+  ui:
+    build: ./frontend
+    container_name: proxify_ui
+    ports:
+      # UI Dashboard sẽ nghe trên port 8888 của máy host (Nginx -> React SPA)
+      - "8888:80"
+    depends_on:
+      - proxify
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    container_name: proxify_db
+    environment:
+      - POSTGRES_USER=proxify_user
+      - POSTGRES_PASSWORD=proxify_pass
+      - POSTGRES_DB=proxify_db
+    ports:
+      # Mở port DB ra ngoài nếu bạn muốn dùng DBeaver kết nối vào xem data
+      - "5432:5432"
+    volumes:
+      - proxify_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proxify_user -d proxify_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  proxify_pgdata:

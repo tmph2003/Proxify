@@ -1,0 +1,6 @@
+﻿mitmproxy>=10.1
+aiohttp>=3.9
+psycopg2-binary>=2.9
+python-dotenv>=1.0.0
+curl_cffi>=0.16.0
+asyncpg>=0.29.0
