@@ -14,10 +14,22 @@ services:
       - COMMIT_INTERVAL=2.0
       - DUMP_DIR=dumps
       - SPOOF_DOMAINS=${SPOOF_DOMAINS:-tiktok.com,tiktokv.com,byteoversea.com,tiktokcdn.com,zalo.me,chat.zalo.me,zalo.vn,zalopay.vn,zaloapp.com}
-      - IGNORE_HOSTS=captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,c.youtube.com,signaler-pa.youtube.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*
+      - IGNORE_HOSTS=captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,c.youtube.com,signaler-pa.youtube.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*,accounts.youtube.com,gvt1.com,gvt3.com,fastly-edge.com,play.google.com
       - DB_DSN=postgresql://proxify_user:proxify_pass@db:5432/proxify_db
       - DB_INTEGRATION_ENABLED=true
       - RECORD_RETENTION_DAYS=${RECORD_RETENTION_DAYS:-7}
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    extra_hosts:
+      - "ks.sunhouse.com.vn:172.16.100.130"
+      - "erp.sunhouse.com.vn:172.16.100.130"
+      - "git.sunhouse.com.vn:172.16.100.130"
+      - "trino.sunhouse.com.vn:172.16.100.130"
+      - "bi.sunhouse.com.vn:172.16.100.183"
+      - "jira.sunhouse.com.vn:172.16.100.130"
+      - "sso.sunhouse.com.vn:172.16.100.130"
+      - "minio.sunhouse.com.vn:172.16.100.129"
     command: ["python", "-m", "proxify"]
     depends_on:
       db:

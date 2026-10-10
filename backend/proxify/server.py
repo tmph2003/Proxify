@@ -71,12 +71,16 @@ class ProxyAddon:
 
     async def responseheaders(self, flow):
         try:
+            if flow and flow.response and "alt-svc" in flow.response.headers:
+                del flow.response.headers["alt-svc"]
             await self.router.route_responseheaders(flow)
         except Exception as e:
             logger.error(f"Error in ProxyAddon.responseheaders: {e}", exc_info=True)
 
     async def response(self, flow):
         try:
+            if flow and flow.response and "alt-svc" in flow.response.headers:
+                del flow.response.headers["alt-svc"]
             await self.router.route_response(flow)
         except Exception as e:
             logger.error(f"Error in ProxyAddon.response: {e}", exc_info=True)
@@ -157,7 +161,7 @@ async def run_server():
     import re
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,c.youtube.com,signaler-pa.youtube.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*",
+        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,c.youtube.com,signaler-pa.youtube.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*,accounts.youtube.com,gvt1.com,gvt3.com,fastly-edge.com,play.google.com",
     )
     ignored_hosts = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in raw_ignore.split(",") if h.strip()]
     ignore_patterns = []
