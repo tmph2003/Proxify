@@ -329,59 +329,71 @@ async def test_proxy_addon_catches_unhandled_exceptions_gracefully():
 
 
 def test_inverted_scope_ignore_regex_strict_isolation():
-    """Verify that inverted scope regex ignores (passes through) all non-target domains
-    while properly intercepting YouTube, Facebook, Zalo, and ad networks."""
+    """Verify that mitmproxy allow_hosts & ignore_hosts accurately intercept
+    YouTube, Facebook, Zalo, and ad networks, while passing through all other web traffic."""
     import re
 
-    DEFAULT_TARGET_DOMAINS = [
-        r'(?:(?:www\.|m\.)?youtube\.com)',
-        r'youtubei\.googleapis\.com',
-        r'(?:(?:www\.|m\.|web\.)?facebook\.com)',
-        r'(?:(?:www\.|web\.)?messenger\.com)',
-        r'(?:(?:[a-z0-9_.-]+\.)?chat\.zalo\.me)',
-        r'(?:(?:[a-z0-9_.-]+\.)?zalo\.me)',
-        r'(?:(?:[a-z0-9_.-]+\.)?doubleclick\.net)',
-        r'(?:(?:[a-z0-9_.-]+\.)?googleadservices\.com)',
-        r'(?:(?:[a-z0-9_.-]+\.)?googlesyndication\.com)',
+    ALLOW_DOMAINS = [
+        r'(?:^|\.)youtube\.com(?::|$)',
+        r'(?:^|\.)youtubei\.googleapis\.com(?::|$)',
+        r'(?:^|\.)facebook\.com(?::|$)',
+        r'(?:^|\.)messenger\.com(?::|$)',
+        r'(?:^|\.)zalo\.me(?::|$)',
+        r'(?:^|\.)doubleclick\.net(?::|$)',
+        r'(?:^|\.)googleadservices\.com(?::|$)',
+        r'(?:^|\.)googlesyndication\.com(?::|$)',
     ]
-    targets_pattern = "|".join(DEFAULT_TARGET_DOMAINS)
-    inverted_ignore_regex = rf'^(?!(?:{targets_pattern})(?::\d+)?$).*'
-    explicit_bypasses = [
+
+    IGNORE_DOMAINS = [
         r'(?:^|\.)googlevideo\.com(?::|$)',
         r'(?:^|\.)c\.youtube\.com(?::|$)',
         r'(?:^|\.)accounts\.youtube\.com(?::|$)',
         r'(?:^|\.)signaler-pa\.youtube\.com(?::|$)',
     ]
-    all_patterns = [inverted_ignore_regex] + explicit_bypasses
 
-    def is_tcp_ignored(host: str) -> bool:
-        return any(bool(re.search(p, host)) for p in all_patterns)
+    def is_mitmproxy_ignored(hostnames: list[str]) -> bool:
+        # Mitmproxy NextLayer logic:
+        # 1. Check allow_hosts: if not allowed, ignored = True (TCP passthrough)
+        not_allowed = not any(
+            re.search(rex, host, re.IGNORECASE)
+            for host in hostnames
+            for rex in ALLOW_DOMAINS
+        )
+        if not_allowed:
+            return True
+        # 2. Check ignore_hosts: if ignored, ignored = True (TCP passthrough)
+        ignored = any(
+            re.search(rex, host, re.IGNORECASE)
+            for host in hostnames
+            for rex in IGNORE_DOMAINS
+        )
+        return bool(ignored)
 
     # 1. Target Domains MUST NOT be ignored (they must be intercepted)
-    assert is_tcp_ignored("www.youtube.com:443") is False
-    assert is_tcp_ignored("youtube.com:443") is False
-    assert is_tcp_ignored("m.youtube.com:443") is False
-    assert is_tcp_ignored("youtubei.googleapis.com:443") is False
-    assert is_tcp_ignored("www.facebook.com:443") is False
-    assert is_tcp_ignored("chat.zalo.me:443") is False
-    assert is_tcp_ignored("tt-profile-wpa.chat.zalo.me:443") is False
-    assert is_tcp_ignored("googleads.g.doubleclick.net:443") is False
-    assert is_tcp_ignored("www.googleadservices.com:443") is False
-    assert is_tcp_ignored("pagead2.googlesyndication.com:443") is False
+    assert is_mitmproxy_ignored(["142.251.155.4:443", "www.youtube.com:443"]) is False
+    assert is_mitmproxy_ignored(["142.251.155.4:443", "youtube.com:443"]) is False
+    assert is_mitmproxy_ignored(["142.251.155.4:443", "m.youtube.com:443"]) is False
+    assert is_mitmproxy_ignored(["142.250.197.10:443", "youtubei.googleapis.com:443"]) is False
+    assert is_mitmproxy_ignored(["157.240.22.35:443", "www.facebook.com:443"]) is False
+    assert is_mitmproxy_ignored(["49.213.95.122:443", "chat.zalo.me:443"]) is False
+    assert is_mitmproxy_ignored(["49.213.95.122:443", "tt-profile-wpa.chat.zalo.me:443"]) is False
+    assert is_mitmproxy_ignored(["142.250.197.226:443", "googleads.g.doubleclick.net:443"]) is False
+    assert is_mitmproxy_ignored(["142.250.197.130:443", "pagead2.googlesyndication.com:443"]) is False
+    assert is_mitmproxy_ignored(["142.250.197.130:443", "www.googleadservices.com:443"]) is False
 
     # 2. General Internet & Internal Systems MUST be ignored (zero-overhead TCP passthrough)
-    assert is_tcp_ignored("c.youtube.com:443") is True
-    assert is_tcp_ignored("accounts.youtube.com:443") is True
-    assert is_tcp_ignored("googlevideo.com:443") is True
-    assert is_tcp_ignored("rr1---sn-n4v7snee.googlevideo.com:443") is True
-    assert is_tcp_ignored("github.com:443") is True
-    assert is_tcp_ignored("mail.google.com:443") is True
-    assert is_tcp_ignored("cohoichoai.com:443") is True
-    assert is_tcp_ignored("speed.cloudflare.com:443") is True
-    assert is_tcp_ignored("chatgpt.com:443") is True
-    assert is_tcp_ignored("ks.sunhouse.com.vn:443") is True
-    assert is_tcp_ignored("shopee.vn:443") is True
-    assert is_tcp_ignored("dantri.com.vn:443") is True
+    assert is_mitmproxy_ignored(["142.250.198.46:443", "c.youtube.com:443"]) is True
+    assert is_mitmproxy_ignored(["142.250.198.46:443", "accounts.youtube.com:443"]) is True
+    assert is_mitmproxy_ignored(["142.250.198.46:443", "googlevideo.com:443"]) is True
+    assert is_mitmproxy_ignored(["142.250.198.46:443", "rr1---sn-n4v7snee.googlevideo.com:443"]) is True
+    assert is_mitmproxy_ignored(["140.82.121.4:443", "github.com:443"]) is True
+    assert is_mitmproxy_ignored(["142.250.198.142:443", "mail.google.com:443"]) is True
+    assert is_mitmproxy_ignored(["103.1.209.52:443", "cohoichoai.com:443"]) is True
+    assert is_mitmproxy_ignored(["172.66.0.218:443", "speed.cloudflare.com:443"]) is True
+    assert is_mitmproxy_ignored(["172.64.155.209:443", "chatgpt.com:443"]) is True
+    assert is_mitmproxy_ignored(["172.16.100.130:443", "ks.sunhouse.com.vn:443"]) is True
+    assert is_mitmproxy_ignored(["103.14.168.10:443", "shopee.vn:443"]) is True
+    assert is_mitmproxy_ignored(["111.65.250.10:443", "dantri.com.vn:443"]) is True
 
 
 

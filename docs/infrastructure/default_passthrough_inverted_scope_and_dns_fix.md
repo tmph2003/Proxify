@@ -5,17 +5,17 @@ Tài liệu ghi nhận quyết định kiến trúc và thay đổi kỹ thuật
 ---
 
 ## 1. Tóm tắt thay đổi (Summary of Changes)
-- **Đảo ngược phạm vi can thiệp (Inverted Scope Architecture) trong `backend/proxify/server.py`:**
-  - Thay thế mô hình blacklist `IGNORE_HOSTS` chắp vá (càng dùng càng thiếu) bằng **Negative Lookahead Regex (`^(?!(?:targets)(?::\d+)?$).*`)**.
-  - Chỉ giải mã TLS và can thiệp HTTP đối với các nền tảng mục tiêu được chỉ định rõ ràng: YouTube (`youtube.com`, `youtubei.googleapis.com`), Facebook/Messenger (`facebook.com`, `messenger.com`), Zalo Web (`chat.zalo.me`, `zalo.me`), cùng các mạng phân phối quảng cáo (`doubleclick.net`, `googleadservices.com`, `googlesyndication.com`).
+- **Áp dụng cơ chế bản địa `allow_hosts` kết hợp `ignore_hosts` trong `backend/proxify/server.py`:**
+  - Thay thế mô hình blacklist `IGNORE_HOSTS` chắp vá bằng **Mitmproxy Native `allow_hosts`**.
+  - **Phát hiện nút thắt kỹ thuật quan trọng:** Trong module `mitmproxy.addons.next_layer._ignore_connection`, danh sách ứng viên kiểm tra `hostnames` bao gồm cả `context.server.peername` (chuỗi IP:Port dạng `142.251.155.4:443`). Khi sử dụng Negative Lookahead Regex trong `ignore_hosts`, chuỗi IP không chứa tên miền `youtube.com` nên đã kích hoạt khớp regex của IP, vô tình biến toàn bộ kết nối YouTube thành TCP Passthrough thô và làm vô hiệu hóa plugin chặn quảng cáo.
+  - **Giải pháp dứt điểm:** Chuyển sang sử dụng `allow_hosts=allow_patterns` (`youtube.com`, `facebook.com`, `zalo.me`, ad domains) và `ignore_hosts=explicit_bypasses` (`googlevideo.com`, `c.youtube.com`, `accounts.youtube.com`). Cơ chế `allow_hosts` kiểm tra `any(...)` trên toàn bộ danh sách ứng viên, do đó SNI `www.youtube.com:443` được nhận diện chính xác 100%, kích hoạt bộ lọc quảng cáo `YouTubePlugin` ngay lập tức.
   - **100% các website còn lại trên toàn bộ internet** (Google Workspace, GitHub, Shopee, tin tức, nội bộ, ngân hàng, ChatGPT, v.v.) tự động được áp dụng cơ chế **TCP Passthrough thuần túy (Layer 4)**, Mitmproxy hoàn toàn không giải mã SSL, không buffer RAM trong Python event loop, không bắn WebSocket và không ghi vào cơ sở dữ liệu PostgreSQL.
-  - Thiết lập cơ chế bypass cứng dự phòng (`explicit_bypasses`) cho `googlevideo.com`, `c.youtube.com`, `accounts.youtube.com`, `signaler-pa.youtube.com`.
 - **Tối ưu hóa phân giải tên miền (DNS Resolution) trong `docker-compose.yml`:**
   - Cập nhật DNS server của container `proxify_app`: ưu tiên gateway router mạng nội bộ `192.168.100.1` (thời gian phân giải 2ms - 4ms) và dự phòng qua Google DNS `8.8.8.8` (23ms). Loại bỏ DNS `1.1.1.1` do độ trễ chập chờn lên tới 244ms tại Việt Nam và gây lỗi `[Errno -3] Temporary failure in name resolution`.
 - **Bổ sung ánh xạ tĩnh hệ thống nội bộ Sunhouse vào Windows `hosts`:**
   - Khai báo ánh xạ các domain nghiệp vụ nội bộ (`ks.sunhouse.com.vn: 172.16.100.130`, v.v.) trực tiếp vào `C:\Windows\System32\drivers\etc\hosts` của máy host để trình duyệt phân giải tức thì 0ms, loại bỏ hiện tượng treo timeout khi chờ DNS công cộng.
 - **Bổ sung kiểm thử hồi quy & cách ly phạm vi trong `tests/test_router_and_resilience.py`:**
-  - Viết mới test case `test_inverted_scope_ignore_regex_strict_isolation()` kiểm tra tính đúng đắn của 22 domain mục tiêu và domain bypass (100% pass, 87/87 tests toàn hệ thống).
+  - Viết mới test case `test_inverted_scope_ignore_regex_strict_isolation()` kiểm tra tính đúng đắn của logic phân định `allow_hosts` và `ignore_hosts` với 22 trường hợp thực tế (100% pass, 87/87 tests toàn hệ thống).
 
 ---
 

@@ -157,27 +157,24 @@ async def run_server():
     worker = BackgroundWorker(db_manager)
     worker.start()
 
-    # 2.5 Strict Inverted Scope: Default TCP Passthrough for 100% of the Internet
+    # 2.5 Strict Scope: Native allow_hosts for target platforms & ignore_hosts for explicit sub-bypasses
     # Clean Architecture & Anti-Bottleneck Principle:
-    # Instead of an incomplete, fragile whitelist of ignored hosts (which causes
-    # every unlisted website in the universe to be SSL-decrypted and buffered in Python),
-    # Proxify enforces a Strict Inverted Scope:
-    # ONLY explicitly targeted platform domains and their ad networks are decrypted.
+    # Mitmproxy natively evaluates `allow_hosts` across all candidate hostnames/SNI.
+    # Connections are ONLY intercepted if their hostname or SNI matches an allow_hosts pattern.
     # 100% of all other web traffic (99.9% of the internet) automatically passes
     # through at native wire speed via Mitmproxy's raw TCP Passthrough (zero TLS decryption,
     # zero Python memory buffering, zero database/websocket serialization).
     import re
 
     DEFAULT_TARGET_DOMAINS = [
-        r'(?:(?:www\.|m\.)?youtube\.com)',
-        r'youtubei\.googleapis\.com',
-        r'(?:(?:www\.|m\.|web\.)?facebook\.com)',
-        r'(?:(?:www\.|web\.)?messenger\.com)',
-        r'(?:(?:[a-z0-9_.-]+\.)?chat\.zalo\.me)',
-        r'(?:(?:[a-z0-9_.-]+\.)?zalo\.me)',
-        r'(?:(?:[a-z0-9_.-]+\.)?doubleclick\.net)',
-        r'(?:(?:[a-z0-9_.-]+\.)?googleadservices\.com)',
-        r'(?:(?:[a-z0-9_.-]+\.)?googlesyndication\.com)',
+        r'(?:^|\.)youtube\.com(?::|$)',
+        r'(?:^|\.)youtubei\.googleapis\.com(?::|$)',
+        r'(?:^|\.)facebook\.com(?::|$)',
+        r'(?:^|\.)messenger\.com(?::|$)',
+        r'(?:^|\.)zalo\.me(?::|$)',
+        r'(?:^|\.)doubleclick\.net(?::|$)',
+        r'(?:^|\.)googleadservices\.com(?::|$)',
+        r'(?:^|\.)googlesyndication\.com(?::|$)',
     ]
 
     custom_intercept = os.getenv("INTERCEPT_DOMAINS", "").strip()
@@ -185,14 +182,12 @@ async def run_server():
         for d in custom_intercept.split(","):
             d = d.strip()
             if d:
-                DEFAULT_TARGET_DOMAINS.append(rf'(?:(?:[a-z0-9_.-]+\.)?{re.escape(d)})')
+                DEFAULT_TARGET_DOMAINS.append(rf'(?:^|\.){re.escape(d)}(?::|$)')
 
-    targets_pattern = "|".join(DEFAULT_TARGET_DOMAINS)
-    # Negative lookahead: matches any host string that does NOT end in one of target domains (optionally followed by :port)
-    inverted_ignore_regex = rf'^(?!(?:{targets_pattern})(?::\d+)?$).*'
+    allow_patterns = DEFAULT_TARGET_DOMAINS
 
     # Explicit bypass safety net for high-bandwidth/auth domains that should never be intercepted
-    # even if a loose regex or subdomain pattern might otherwise touch them:
+    # even within allowed domains:
     explicit_bypasses = [
         r'(?:^|\.)googlevideo\.com(?::|$)',
         r'(?:^|\.)c\.youtube\.com(?::|$)',
@@ -200,15 +195,13 @@ async def run_server():
         r'(?:^|\.)signaler-pa\.youtube\.com(?::|$)',
     ]
 
-    ignore_patterns = [inverted_ignore_regex] + explicit_bypasses
-
     # Also parse IGNORE_HOSTS for Router application layer safety net
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
         "googlevideo.com,c.youtube.com,accounts.youtube.com,signaler-pa.youtube.com,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*,gvt1.com,gvt3.com,fastly-edge.com,play.google.com,googleusercontent.com,google.com.vn,chatgpt.com,openai.com,apple.com,vscode-cdn.net,exp-tas.com,gravatar.com",
     )
     ignored_hosts = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in raw_ignore.split(",") if h.strip()]
-    logger.info("🛡️ Traffic Scope: Default TCP Passthrough enabled. Only YouTube, Facebook, Zalo, and ad networks are intercepted.")
+    logger.info("🛡️ Traffic Scope: allow_hosts enabled for YouTube, Facebook, Zalo, and ad networks. All other traffic is TCP Passthrough.")
 
     # 3. Initialize Router
     router = ProxyRouter(ignored_hosts=ignored_hosts)
@@ -220,7 +213,8 @@ async def run_server():
         listen_port=proxy_port,
         ssl_insecure=True,
         http2=True,
-        ignore_hosts=ignore_patterns,
+        allow_hosts=allow_patterns,
+        ignore_hosts=explicit_bypasses,
     )
     master = DumpMaster(opts, with_termlog=True, with_dumper=False)
     master.addons.add(ProxyAddon(router))
