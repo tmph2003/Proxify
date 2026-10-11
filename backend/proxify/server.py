@@ -157,21 +157,58 @@ async def run_server():
     worker = BackgroundWorker(db_manager)
     worker.start()
 
-    # 2.5 Parse ignored hosts
+    # 2.5 Strict Inverted Scope: Default TCP Passthrough for 100% of the Internet
+    # Clean Architecture & Anti-Bottleneck Principle:
+    # Instead of an incomplete, fragile whitelist of ignored hosts (which causes
+    # every unlisted website in the universe to be SSL-decrypted and buffered in Python),
+    # Proxify enforces a Strict Inverted Scope:
+    # ONLY explicitly targeted platform domains and their ad networks are decrypted.
+    # 100% of all other web traffic (99.9% of the internet) automatically passes
+    # through at native wire speed via Mitmproxy's raw TCP Passthrough (zero TLS decryption,
+    # zero Python memory buffering, zero database/websocket serialization).
     import re
+
+    DEFAULT_TARGET_DOMAINS = [
+        r'(?:(?:www\.|m\.)?youtube\.com)',
+        r'youtubei\.googleapis\.com',
+        r'(?:(?:www\.|m\.|web\.)?facebook\.com)',
+        r'(?:(?:www\.|web\.)?messenger\.com)',
+        r'(?:(?:[a-z0-9_.-]+\.)?chat\.zalo\.me)',
+        r'(?:(?:[a-z0-9_.-]+\.)?zalo\.me)',
+        r'(?:(?:[a-z0-9_.-]+\.)?doubleclick\.net)',
+        r'(?:(?:[a-z0-9_.-]+\.)?googleadservices\.com)',
+        r'(?:(?:[a-z0-9_.-]+\.)?googlesyndication\.com)',
+    ]
+
+    custom_intercept = os.getenv("INTERCEPT_DOMAINS", "").strip()
+    if custom_intercept:
+        for d in custom_intercept.split(","):
+            d = d.strip()
+            if d:
+                DEFAULT_TARGET_DOMAINS.append(rf'(?:(?:[a-z0-9_.-]+\.)?{re.escape(d)})')
+
+    targets_pattern = "|".join(DEFAULT_TARGET_DOMAINS)
+    # Negative lookahead: matches any host string that does NOT end in one of target domains (optionally followed by :port)
+    inverted_ignore_regex = rf'^(?!(?:{targets_pattern})(?::\d+)?$).*'
+
+    # Explicit bypass safety net for high-bandwidth/auth domains that should never be intercepted
+    # even if a loose regex or subdomain pattern might otherwise touch them:
+    explicit_bypasses = [
+        r'(?:^|\.)googlevideo\.com(?::|$)',
+        r'(?:^|\.)c\.youtube\.com(?::|$)',
+        r'(?:^|\.)accounts\.youtube\.com(?::|$)',
+        r'(?:^|\.)signaler-pa\.youtube\.com(?::|$)',
+    ]
+
+    ignore_patterns = [inverted_ignore_regex] + explicit_bypasses
+
+    # Also parse IGNORE_HOSTS for Router application layer safety net
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,c.youtube.com,signaler-pa.youtube.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*,accounts.youtube.com,gvt1.com,gvt3.com,fastly-edge.com,play.google.com,googleusercontent.com,google.com.vn,chatgpt.com,openai.com,apple.com,vscode-cdn.net,exp-tas.com,gravatar.com",
+        "googlevideo.com,c.youtube.com,accounts.youtube.com,signaler-pa.youtube.com,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*,gvt1.com,gvt3.com,fastly-edge.com,play.google.com,googleusercontent.com,google.com.vn,chatgpt.com,openai.com,apple.com,vscode-cdn.net,exp-tas.com,gravatar.com",
     )
     ignored_hosts = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in raw_ignore.split(",") if h.strip()]
-    ignore_patterns = []
-    for h in ignored_hosts:
-        if h.endswith("*"):
-            prefix = h.rstrip("*")
-            ignore_patterns.append(rf"^{re.escape(prefix)}.*")
-        else:
-            ignore_patterns.append(rf"(?:^|\.){re.escape(h)}(?::|$)")
-    logger.info(f"🚫 Ignored Hosts (Passthrough): {ignored_hosts}")
+    logger.info("🛡️ Traffic Scope: Default TCP Passthrough enabled. Only YouTube, Facebook, Zalo, and ad networks are intercepted.")
 
     # 3. Initialize Router
     router = ProxyRouter(ignored_hosts=ignored_hosts)

@@ -328,3 +328,60 @@ async def test_proxy_addon_catches_unhandled_exceptions_gracefully():
     await addon.response(dummy_flow)
 
 
+def test_inverted_scope_ignore_regex_strict_isolation():
+    """Verify that inverted scope regex ignores (passes through) all non-target domains
+    while properly intercepting YouTube, Facebook, Zalo, and ad networks."""
+    import re
+
+    DEFAULT_TARGET_DOMAINS = [
+        r'(?:(?:www\.|m\.)?youtube\.com)',
+        r'youtubei\.googleapis\.com',
+        r'(?:(?:www\.|m\.|web\.)?facebook\.com)',
+        r'(?:(?:www\.|web\.)?messenger\.com)',
+        r'(?:(?:[a-z0-9_.-]+\.)?chat\.zalo\.me)',
+        r'(?:(?:[a-z0-9_.-]+\.)?zalo\.me)',
+        r'(?:(?:[a-z0-9_.-]+\.)?doubleclick\.net)',
+        r'(?:(?:[a-z0-9_.-]+\.)?googleadservices\.com)',
+        r'(?:(?:[a-z0-9_.-]+\.)?googlesyndication\.com)',
+    ]
+    targets_pattern = "|".join(DEFAULT_TARGET_DOMAINS)
+    inverted_ignore_regex = rf'^(?!(?:{targets_pattern})(?::\d+)?$).*'
+    explicit_bypasses = [
+        r'(?:^|\.)googlevideo\.com(?::|$)',
+        r'(?:^|\.)c\.youtube\.com(?::|$)',
+        r'(?:^|\.)accounts\.youtube\.com(?::|$)',
+        r'(?:^|\.)signaler-pa\.youtube\.com(?::|$)',
+    ]
+    all_patterns = [inverted_ignore_regex] + explicit_bypasses
+
+    def is_tcp_ignored(host: str) -> bool:
+        return any(bool(re.search(p, host)) for p in all_patterns)
+
+    # 1. Target Domains MUST NOT be ignored (they must be intercepted)
+    assert is_tcp_ignored("www.youtube.com:443") is False
+    assert is_tcp_ignored("youtube.com:443") is False
+    assert is_tcp_ignored("m.youtube.com:443") is False
+    assert is_tcp_ignored("youtubei.googleapis.com:443") is False
+    assert is_tcp_ignored("www.facebook.com:443") is False
+    assert is_tcp_ignored("chat.zalo.me:443") is False
+    assert is_tcp_ignored("tt-profile-wpa.chat.zalo.me:443") is False
+    assert is_tcp_ignored("googleads.g.doubleclick.net:443") is False
+    assert is_tcp_ignored("www.googleadservices.com:443") is False
+    assert is_tcp_ignored("pagead2.googlesyndication.com:443") is False
+
+    # 2. General Internet & Internal Systems MUST be ignored (zero-overhead TCP passthrough)
+    assert is_tcp_ignored("c.youtube.com:443") is True
+    assert is_tcp_ignored("accounts.youtube.com:443") is True
+    assert is_tcp_ignored("googlevideo.com:443") is True
+    assert is_tcp_ignored("rr1---sn-n4v7snee.googlevideo.com:443") is True
+    assert is_tcp_ignored("github.com:443") is True
+    assert is_tcp_ignored("mail.google.com:443") is True
+    assert is_tcp_ignored("cohoichoai.com:443") is True
+    assert is_tcp_ignored("speed.cloudflare.com:443") is True
+    assert is_tcp_ignored("chatgpt.com:443") is True
+    assert is_tcp_ignored("ks.sunhouse.com.vn:443") is True
+    assert is_tcp_ignored("shopee.vn:443") is True
+    assert is_tcp_ignored("dantri.com.vn:443") is True
+
+
+
