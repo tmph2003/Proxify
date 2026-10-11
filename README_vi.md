@@ -73,7 +73,7 @@
 
 ## 🌐 Các Nền Tảng Hỗ Trợ Sẵn (Supported Platforms & Plugins)
 
-### 📘 1. Facebook Platform (`platforms/facebook/`)
+### 📘 1. Nền Tảng Facebook (`backend/extensions/facebook/`)
 - **Tách Rời Feed & Comment ($50\times$ Speedup)**: Cào danh sách bài viết nhóm theo thứ tự thời gian (`CHRONOLOGICAL`) siêu tốc (~1.5s/trang), tách biệt hoàn toàn với tiến trình cào bình luận.
 - **Cơ Chế Làm Mới Bài Viết Kép & Phòng Thủ Checkpoint (Dual-Engine Post Refresh & Zero-Checkpoint)**:
   - **Engine Ẩn Danh Không Dùng Cookie (Zero-Cookie Anonymous Engine)**: Tự động cập nhật số lượng cảm xúc, lượt bình luận và trạng thái bài viết công khai siêu tốc qua HTTP/2 fingerprinted browser mà không cần truyền cookie tài khoản, triệt tiêu 100% nguy cơ checkpoint.
@@ -84,17 +84,19 @@
 - **Thanh Tác Vụ Nổi Tương Tác (Interactive Floating Action Bar)**: Hỗ trợ làm mới hàng loạt, đồng bộ trạng thái, cào bình luận ngầm theo dõi thời gian thực và xuất dữ liệu ra CSV.
 - **Giao Diện Facebook Dashboard Nâng Cao**: Bộ chọn nhóm, lọc theo tác giả, ngày tháng, tìm kiếm full-text và modal xem cây bình luận phân cấp chuyên sâu.
 
-### 💬 2. Zalo Platform (`platforms/zalo/` & `plugins/zalo.py`)
+### 💬 2. Nền Tảng Zalo (`backend/extensions/zalo/`)
 - **Giải Mã Giao Thức Zalo**: Sử dụng engine JavaScript nhúng (`crypto_subtle.js`) để giải mã các gói tin mã hóa đầu cuối (E2EE) và dữ liệu WebSocket của Zalo Web.
-- **Bóc Tách Tin Nhắn & Hội Thoại**: Tự động trích xuất cấu trúc tin nhắn, hội thoại cá nhân, danh bạ bạn bè và thông tin thành viên nhóm Zalo (`database.py`, `models.py`, `repository.py`).
-- **Giao Diện Zalo Riêng Biệt**: Template giao diện độc lập (`zalo.html`, `zalo.js`) phục vụ việc theo dõi tin nhắn và danh bạ trực tiếp.
+- **Bóc Tách Tin Nhắn & Hội Thoại**: Tự động trích xuất cấu trúc tin nhắn, hội thoại cá nhân, danh bạ bạn bè và thông tin thành viên nhóm Zalo vào cơ sở dữ liệu PostgreSQL.
+- **Giao Diện Zalo Riêng Biệt**: Giao diện độc lập phục vụ việc theo dõi tin nhắn và danh bạ trực tiếp.
 
-### 🎥 3. YouTube Plugin (`plugins/youtube.py` & `utils/youtube_utils.py`)
-- **Lọc & Loại Bỏ Quảng Cáo (Ad-Stripping)**: Tự động phát hiện và loại bỏ các đoạn quảng cáo chèn trong luồng dữ liệu video/audio của YouTube (`strip_youtube_ads`).
-- **Bắt Luồng Video/Audio Stream**: Bóc tách các URL streaming media trực tiếp, hỗ trợ việc tải về hoặc phát nền không giới hạn.
+### 🎥 3. Nền Tảng & Tiện Ích YouTube (`backend/extensions/youtube/`)
+- **Lọc Sạch Quảng Cáo An Toàn (Graceful Ad-Stripping)**: Bóc tách chính xác các container quảng cáo cấp cao (`clean_youtube_json_data`) trong Innertube JSON và mã HTML trang xem mà không làm hỏng máy trạng thái (state machine) hoặc các nút bấm Pause/Play của player.
+- **Chống Dừng Hình Tự Động (Anti-AFK Watchdog)**: Tự động nhúng script giám sát và điều chỉnh ngưỡng bất hoạt (`lactThresholdMs`) lên 1.000 ngày, triệt tiêu vĩnh viễn hộp thoại gây gián đoạn "Video đã tạm dừng. Tiếp tục xem?".
+- **Truyền Tải Luồng Trực Tiếp Không Độ Trễ**: Luồng dữ liệu video streaming dung lượng lớn (`googlevideo.com`) đi qua raw TCP Passthrough ở tốc độ gốc, không qua giải mã TLS hay đệm bộ nhớ Python.
 
-### 🔌 4. TLS Spoofer Plugin (`plugins/tls_spoofer.py`)
-- Giả lập vân tay TLS ClientHello và bộ mã hóa Cipher Suites chuẩn của Google Chrome trên Windows/macOS, che giấu dấu vết proxy đối với các hệ thống WAF giám sát JA3.
+### 🔌 4. Bộ Cách Ly Không Tốn Tài Nguyên & Stealth Suite (`backend/proxify/utils/stealth.py`)
+- **Phạm Vi Đánh Chặn Nghịch Đảo (`allow_hosts`)**: Chỉ can thiệp vào các API nền tảng mục tiêu; 100% lưu lượng Internet khác (Google Workspace, GitHub, game online, telemetry hệ thống) được passthrough ở tốc độ dây mạng gốc.
+- **Giả Lập TLS ClientHello**: Đổi lốt vân tay TLS ClientHello và bộ mã hóa Cipher Suites chuẩn của Google Chrome, che giấu dấu vết proxy đối với các hệ thống WAF giám sát JA3.
 
 ---
 
@@ -163,31 +165,23 @@ graph TD
 Proxify/
 ├── backend/
 │   ├── chrome_extension/        # Chrome Extension Bridge (Background Service Worker & Content Script)
-│   ├── proxify/
-│   │   ├── core/                # Lõi điều phối hệ thống
-│   │   │   ├── router.py        # Fast Proxy Router phân luồng
-│   │   │   ├── traffic_storage/ # Worker lưu trữ traffic thô bất đồng bộ
-│   │   │   └── worker.py        # Background Normalization Worker
-│   │   ├── platforms/           # Bộ trích xuất nghiệp vụ chuyên sâu theo nền tảng
-│   │   │   ├── facebook/        # Facebook Engine (Crawler, Bridge, Auth, Extractor, API)
-│   │   │   └── zalo/            # Zalo Engine (Crypto Decryption, Models, Extractor, Database)
-│   │   ├── plugins/             # Các Plugin cắm nóng mở rộng
-│   │   │   ├── registry.py      # Plugin Registry & Auto-Discovery
-│   │   │   ├── facebook.py      # Facebook Traffic Adapter
-│   │   │   ├── zalo.py          # Zalo Traffic Adapter
-│   │   │   ├── youtube.py       # YouTube Ad-Stripper & Stream Interceptor
-│   │   │   └── tls_spoofer.py   # TLS JA3 ClientHello Spoofer
-│   │   ├── utils/               # Công cụ bổ trợ
-│   │   │   ├── stealth.py       # Nhận diện Soft-block, CAPTCHA, WAF Bypass
-│   │   │   ├── circuit_breaker.py # Cơ chế tự ngắt mạch chống sập
-│   │   │   ├── youtube_utils.py # Hàm bóc tách luồng & strip quảng cáo
-│   │   │   └── graphql.py       # Parser AST truy vấn GraphQL
-│   │   ├── server.py            # Mitmproxy DumpMaster & Clean Logging setup
-│   │   └── dashboard.py         # Metrics & Internal Dashboard
-│   └── tests/                   # Bộ kiểm thử tự động pytest
+│   ├── extensions/              # Các Extension Nền Tảng Module Hóa
+│   │   ├── facebook/            # Facebook Engine (Crawler, Bridge, Auth, Extractor, Multi-Tenant)
+│   │   ├── youtube/             # YouTube Engine (Ad-Stripper, Anti-AFK, Stream Passthrough)
+│   │   └── zalo/                # Zalo Engine (Crypto Decryption, Models, Extractor, Database)
+│   ├── proxify/                 # Lõi Framework & Điều Phối
+│   │   ├── core/                # Lõi điều phối hệ thống & Event Bus
+│   │   ├── database/            # Quản lý Connection Pool PostgreSQL & Migrations
+│   │   ├── plugins/             # Plugin Registry & Base Classes
+│   │   ├── sdk/                 # Public SDK & Interface vòng đời
+│   │   ├── utils/               # Công cụ bổ trợ (Stealth, Circuit Breaker, GraphQL AST)
+│   │   ├── server.py            # Mitmproxy DumpMaster & quản lý phạm vi traffic
+│   │   └── dashboard.py         # API phục vụ Dashboard nội bộ
+│   └── tests/                   # Toàn bộ 87 bài kiểm thử tự động pytest
 ├── frontend/                    # Giao diện Web hiện đại (React + TypeScript + Vite)
 │   ├── src/                     # Mã nguồn UI (Facebook Console, Traffic Viewer, Hooks)
 │   └── nginx.conf               # Nginx server cấu hình cho Docker
+├── scripts/                     # Script tiện ích & vận hành (tạo shortcut Chrome cách ly,...)
 ├── docs/                        # Toàn bộ tài liệu kiến trúc & AI Developer Logs
 └── docker-compose.yml           # Khởi chạy đa dịch vụ (App, UI, Database)
 ```

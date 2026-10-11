@@ -73,7 +73,7 @@ Built on the industrial-grade **Mitmproxy 10** engine, Proxify seamlessly unites
 
 ## 🌐 Supported Platforms & Plugins
 
-### 📘 1. Facebook Platform (`platforms/facebook/`)
+### 📘 1. Facebook Platform (`backend/extensions/facebook/`)
 - **Decoupled Feed & Comment Engine (50x Faster)**: Super-fast chronological feed scraping (~1.5s/page) decoupled from deep comment extraction.
 - **Dual-Engine Post Refresh & Zero-Checkpoint Architecture**:
   - **Zero-Cookie Anonymous Engine**: Instantly refreshes reactions, comment counts, and post availability using browser-fingerprinted HTTP/2 sessions without sending account cookies, eliminating checkpoint risks.
@@ -84,17 +84,19 @@ Built on the industrial-grade **Mitmproxy 10** engine, Proxify seamlessly unites
 - **Interactive Floating Action Bar**: Bulk refresh, status verification, background comment crawling with live progress polling, and CSV export.
 - **Facebook Dashboard Console**: Group selector, author filters, full-text search, and multi-level comment hierarchy viewer.
 
-### 💬 2. Zalo Platform (`platforms/zalo/` & `plugins/zalo.py`)
+### 💬 2. Zalo Platform (`backend/extensions/zalo/`)
 - **Protocol & Crypto Decryption**: Uses an embedded JavaScript runtime (`crypto_subtle.js`) to decrypt end-to-end encrypted packets and WebSocket messages from Zalo Web.
-- **Message & Contact Extractor**: Automatically parses chat messages, group memberships, and contact books into structured PostgreSQL tables (`database.py`, `models.py`, `repository.py`).
-- **Dedicated Zalo Web UI**: Independent interface (`zalo.html`, `zalo.js`) for inspecting decrypted Zalo messages and contacts in real-time.
+- **Message & Contact Extractor**: Automatically parses chat messages, group memberships, and contact books into structured PostgreSQL tables.
+- **Dedicated Zalo Web UI**: Independent interface for inspecting decrypted Zalo messages and contacts in real-time.
 
-### 🎥 3. YouTube Plugin (`plugins/youtube.py` & `utils/youtube_utils.py`)
-- **Ad-Stripping Engine**: Automatically identifies and strips video/audio advertising segments from streaming payloads (`strip_youtube_ads`).
-- **Stream URL Interceptor**: Extracts direct media streaming URLs for background playback and offline storage.
+### 🎥 3. YouTube Platform & Enhancer (`backend/extensions/youtube/`)
+- **Graceful Ad-Stripping Engine**: Intelligently prunes top-level ad containers (`clean_youtube_json_data`) in Innertube JSON APIs and watch HTML without corrupting the player's internal state machine or breaking pause/play controls.
+- **Inline Anti-AFK Watchdog**: Injects a lightweight in-page watchdog script and resets inactivity thresholds (`lactThresholdMs`) to 1,000 days, permanently bypassing "Video paused. Continue watching?" interruptions.
+- **Zero-Buffering Stream Passthrough**: Routes high-throughput video chunks (`googlevideo.com`) via raw TCP Passthrough without TLS decryption overhead or Python memory buffering.
 
-### 🔌 4. TLS Spoofer Plugin (`plugins/tls_spoofer.py`)
-- Impersonates standard Google Chrome TLS ClientHello configurations and Cipher Suites, disguising proxy connections from JA3 fingerprint monitors.
+### 🔌 4. Zero-Overhead Passthrough & Stealth Suite (`backend/proxify/utils/stealth.py`)
+- **Inverted Scope Protection (`allow_hosts`)**: Only intercepts target platform APIs; 100% of non-target internet traffic (Google Workspace, GitHub, games, OS telemetry) passes through at raw wire speed.
+- **TLS ClientHello Impersonation**: Disguises proxy connections from JA3 fingerprint monitors using standard browser cipher suites.
 
 ---
 
@@ -158,36 +160,28 @@ graph TD
 ---
 
 ## 📂 Directory Structure
-
+ 
 ```text
 Proxify/
 ├── backend/
 │   ├── chrome_extension/        # Browser Extension Bridge (Service Worker & Content Script)
-│   ├── proxify/
-│   │   ├── core/                # System orchestration
-│   │   │   ├── router.py        # Fast Proxy Router
-│   │   │   ├── traffic_storage/ # Asynchronous raw traffic persistence
-│   │   │   └── worker.py        # Normalization background worker
-│   │   ├── platforms/           # Specialized platform engines
-│   │   │   ├── facebook/        # Facebook (Crawler, Bridge, Auth, Extractor, API)
-│   │   │   └── zalo/            # Zalo (Crypto Decryption, Models, Extractor, DB)
-│   │   ├── plugins/             # Dynamic drop-in plugins
-│   │   │   ├── registry.py      # Plugin Registry & Auto-Discovery
-│   │   │   ├── facebook.py      # Facebook Traffic Adapter
-│   │   │   ├── zalo.py          # Zalo Traffic Adapter
-│   │   │   ├── youtube.py       # YouTube Ad-Stripper & Stream Interceptor
-│   │   │   └── tls_spoofer.py   # TLS ClientHello / JA3 Spoofer
-│   │   ├── utils/               # Shared utilities
-│   │   │   ├── stealth.py       # Soft-block detection & WAF bypass
-│   │   │   ├── circuit_breaker.py # Circuit breaker resilience
-│   │   │   ├── youtube_utils.py # Media stream extraction & ad removal
-│   │   │   └── graphql.py       # GraphQL AST parser
-│   │   ├── server.py            # Mitmproxy DumpMaster & Clean Logging setup
-│   │   └── dashboard.py         # Internal metrics dashboard
-│   └── tests/                   # Pytest test suite
+│   ├── extensions/              # Modular Platform Extensions
+│   │   ├── facebook/            # Facebook (Crawler, Bridge, Auth, Extractor, Multi-Tenant)
+│   │   ├── youtube/             # YouTube (Ad-Stripper, Anti-AFK, Stream Passthrough)
+│   │   └── zalo/                # Zalo (Crypto Decryption, Models, Extractor, DB)
+│   ├── proxify/                 # Core framework & orchestration
+│   │   ├── core/                # System orchestration & event bus
+│   │   ├── database/            # PostgreSQL connection pool & migrations
+│   │   ├── plugins/             # Plugin registry & base classes
+│   │   ├── sdk/                 # Public SDK & lifecycle interfaces
+│   │   ├── utils/               # Shared utilities (stealth, circuit breaker, graphql)
+│   │   ├── server.py            # Mitmproxy DumpMaster & traffic scope management
+│   │   └── dashboard.py         # Internal metrics dashboard API
+│   └── tests/                   # Pytest test suite (87 tests)
 ├── frontend/                    # Modern React Web Dashboard (React + Vite + TypeScript)
 │   ├── src/                     # UI components, state hooks, traffic viewers
 │   └── nginx.conf               # Nginx production web server configuration
+├── scripts/                     # Operational & utility scripts (e.g. shortcut creators)
 ├── docs/                        # Architecture documentation & AI Developer Changelog
 └── docker-compose.yml           # Multi-container orchestration (App, UI, Database)
 ```
