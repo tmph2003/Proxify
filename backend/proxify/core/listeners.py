@@ -34,7 +34,8 @@ class DashboardBroadcaster(EventListener):
             duration_ms = round((time.time() - start_time) * 1000, 2)
 
         resp_content_type = response.headers.get("content-type", "")
-        resp_size = len(response.content) if response.content else 0
+        raw_content = getattr(response, "raw_content", None)
+        resp_size = len(raw_content) if raw_content else 0
 
         is_graphql = "graphql" in path.lower()
         

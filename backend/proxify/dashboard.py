@@ -131,17 +131,27 @@ class Dashboard:
 
     async def _handle_list_requests(self, request: web.Request) -> web.Response:
         """List captured requests with filters."""
+        import asyncio
         params = request.query
         try:
-            results = self.storage.query_requests(
-                domain=params.get("domain"),
-                method=params.get("method"),
-                status_code=int(params["status_code"]) if params.get("status_code") else None,
-                search=params.get("search"),
-                graphql_only=params.get("graphql_only") == "true",
-                limit=int(params.get("limit", 200)),
-                offset=int(params.get("offset", 0)),
-                since=float(params["since"]) if params.get("since") else self._get_start_of_today_epoch(),
+            domain = params.get("domain")
+            method = params.get("method")
+            status_code = int(params["status_code"]) if params.get("status_code") else None
+            search = params.get("search")
+            graphql_only = params.get("graphql_only") == "true"
+            limit = int(params.get("limit", 200))
+            offset = int(params.get("offset", 0))
+            since = float(params["since"]) if params.get("since") else self._get_start_of_today_epoch()
+            results = await asyncio.to_thread(
+                self.storage.query_requests,
+                domain=domain,
+                method=method,
+                status_code=status_code,
+                search=search,
+                graphql_only=graphql_only,
+                limit=limit,
+                offset=offset,
+                since=since,
             )
         except (ValueError, TypeError) as e:
             return web.json_response({"error": f"Invalid parameter: {e}"}, status=400)
@@ -149,27 +159,33 @@ class Dashboard:
 
     async def _handle_get_request(self, request: web.Request) -> web.Response:
         """Get a single request with full details."""
+        import asyncio
         try:
             request_id = int(request.match_info["id"])
         except (ValueError, TypeError):
             return web.json_response({"error": "Invalid request ID"}, status=400)
-        result = self.storage.get_request(request_id)
+        result = await asyncio.to_thread(self.storage.get_request, request_id)
         if result is None:
             return web.json_response({"error": "Not found"}, status=404)
         return web.json_response(result, dumps=lambda x: json.dumps(x, default=str))
 
     async def _handle_get_domains(self, request: web.Request) -> web.Response:
         """Get unique domains with counts."""
-        domains = self.storage.get_domains(since=self._get_start_of_today_epoch())
+        import asyncio
+        since = self._get_start_of_today_epoch()
+        domains = await asyncio.to_thread(self.storage.get_domains, since=since)
         return web.json_response(domains)
 
     async def _handle_get_stats(self, request: web.Request) -> web.Response:
         """Get capture statistics."""
-        stats = self.storage.get_stats(since=self._get_start_of_today_epoch())
+        import asyncio
+        since = self._get_start_of_today_epoch()
+        stats = await asyncio.to_thread(self.storage.get_stats, since=since)
         return web.json_response(stats, dumps=lambda x: json.dumps(x, default=str))
 
     async def _handle_export(self, request: web.Request) -> web.Response:
         """Export requests in various formats."""
+        import asyncio
         fmt = request.match_info["format"]
         params = request.query
 
@@ -186,7 +202,9 @@ class Dashboard:
         if params.get("graphql_only") == "true":
             filters["graphql_only"] = True
 
-        requests_data = self.storage.get_requests_for_export(ids=ids, **filters)
+        requests_data = await asyncio.to_thread(
+            self.storage.get_requests_for_export, ids=ids, **filters
+        )
 
         if fmt == "json":
             content = export_to_json(requests_data)
@@ -221,11 +239,12 @@ class Dashboard:
 
     async def _handle_delete_requests(self, request: web.Request) -> web.Response:
         """Delete captured requests."""
+        import asyncio
         params = request.query
         ids = None
         if params.get("ids"):
             ids = [int(x) for x in params["ids"].split(",")]
-        self.storage.delete_requests(ids)
+        await asyncio.to_thread(self.storage.delete_requests, ids)
         return web.json_response({"status": "ok"})
 
     async def _handle_stealth_verify(self, request: web.Request) -> web.Response:

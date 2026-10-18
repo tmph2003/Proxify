@@ -120,6 +120,11 @@ class V1GlobalObserver:
         if self.router and self.router.should_skip_record(domain, path, url):
             return
 
+        # Skip streamed responses (e.g. video chunks, images, fonts, large JS/CSS bundles)
+        # where flow.response.content was not buffered in RAM
+        if getattr(flow.response, "stream", False):
+            return
+
         # Determine whether DB save is allowed based on V1 storage settings
         db_save = getattr(self.db_writer.storage, 'db_integration_enabled', False)
         if db_save:
@@ -129,7 +134,8 @@ class V1GlobalObserver:
                     db_save = False
 
         self.broadcaster(flow, db_save=db_save)
-        self.db_writer(flow, db_save=db_save)
+        if db_save:
+            asyncio.get_running_loop().run_in_executor(None, self.db_writer, flow, db_save)
 
 async def start_dashboard(dashboard_instance, port=8888):
     runner = web.AppRunner(dashboard_instance.app)
@@ -165,7 +171,7 @@ async def run_server():
             if d:
                 allow_patterns.append(rf'(?:^|\.){re.escape(d)}(?::|$)')
 
-    # Explicit bypass safety net for high-bandwidth/auth domains that should never be TLS-intercepted:
+    # Explicit bypass safety net for high-bandwidth/auth/CDN domains that should never be TLS-intercepted:
     explicit_bypasses = [
         r'(?:^|\.)googlevideo\.com(?::|$)',
         r'(?:^|\.)c\.youtube\.com(?::|$)',
@@ -174,12 +180,22 @@ async def run_server():
         r'(?:^|\.)accounts\.google\.com(?::|$)',
         r'(?:^|\.)clients\d*\.google\.com(?::|$)',
         r'(?:^|\.)gvt[123]\.com(?::|$)',
+        r'(?:^|\.)fbcdn\.net(?::|$)',
+        r'(?:^|\.)fbsbx\.com(?::|$)',
+        r'(?:^|\.)edge-chat\.facebook\.com(?::|$)',
+        r'(?:^|\.)web-chat-e2ee\.facebook\.com(?::|$)',
+        r'(?:^|\.)gateway\.facebook\.com(?::|$)',
+        r'(?:^|\.)ytimg\.com(?::|$)',
+        r'(?:^|\.)ggpht\.com(?::|$)',
+        r'(?:^|\.)gstatic\.com(?::|$)',
+        r'(?:^|\.)githubassets\.com(?::|$)',
+        r'(?:^|\.)githubusercontent\.com(?::|$)',
     ]
 
     # Also parse IGNORE_HOSTS for Router application layer safety net (only essential background/CDN noise by default)
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "googlevideo.com,c.youtube.com,accounts.youtube.com,signaler-pa.youtube.com,accounts.google.com,clients6.google.com,client-channel.google.com,gvt1.com,gvt2.com,gvt3.com,1e100.net,nel.goog,msftncsi.com,windowsupdate.com",
+        "googlevideo.com,c.youtube.com,accounts.youtube.com,signaler-pa.youtube.com,accounts.google.com,clients6.google.com,client-channel.google.com,gvt1.com,gvt2.com,gvt3.com,1e100.net,nel.goog,msftncsi.com,windowsupdate.com,fbcdn.net,fbsbx.com,ytimg.com,ggpht.com,gstatic.com",
     )
     ignored_hosts = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in raw_ignore.split(",") if h.strip()]
     if allow_patterns:
