@@ -48,11 +48,13 @@ class ExtensionContext:
         self._filter = filter_instance
         self._event_bus = event_bus
         self._storage = storage
+        self._record_filter_target = None
 
         # Track registered items for diagnostics and lifecycle cleanup
         self._registered_routes: List[web.RouteDef] = []
         self._db_initializers: List[Callable[[], Coroutine[Any, Any, None]]] = []
         self._ui_pages: List[Dict[str, Any]] = []
+        self._record_filters: List[Callable[[Any], bool]] = []
 
     # ─── Property Accessors for Contract Compatibility ─────────────────────
 
@@ -137,6 +139,17 @@ class ExtensionContext:
         for host in host_list:
             self._router.add_ignored_host(host)
         logger.debug(f"[{self.extension_id}] Registered ignored hosts: {host_list}")
+
+    def register_record_filter(self, predicate: Callable[[str, str, str], bool]) -> None:
+        """
+        Register a filter predicate `(domain, path, url) -> bool`.
+        When the predicate returns True, the flow is skipped from Dashboard WebSocket
+        broadcast and Database storage (useful for noisy streaming/telemetry endpoints).
+        """
+        self._record_filters.append(predicate)
+        if hasattr(self._router, "register_record_filter"):
+            self._router.register_record_filter(predicate)
+        logger.debug(f"[{self.extension_id}] Registered record filter: {getattr(predicate, '__name__', repr(predicate))}")
 
     # ─── 2. HTTP Route Registration ────────────────────────────────────────
 

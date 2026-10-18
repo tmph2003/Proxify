@@ -20,7 +20,7 @@ class TLSSpooferPlugin(BasePlugin):
 
         env_domains = os.getenv(
             "SPOOF_DOMAINS",
-            "tiktok.com,tiktokv.com,byteoversea.com,tiktokcdn.com",
+            "",
         )
         self.target_domains = [d.strip() for d in env_domains.split(",") if d.strip()]
 
@@ -35,7 +35,7 @@ class TLSSpooferPlugin(BasePlugin):
         domain = flow.request.pretty_host
 
         # Only spoof requests directed to target domains
-        if not any(d in domain for d in self.target_domains):
+        if not self.target_domains or not any(d in domain for d in self.target_domains):
             return
 
         # Don't spoof WebSockets
@@ -43,10 +43,6 @@ class TLSSpooferPlugin(BasePlugin):
             flow.request.headers.get("upgrade", "").lower() == "websocket"
             or getattr(flow, "websocket", None)
         ):
-            return
-
-        # Don't re-spoof our own crawler requests
-        if "x-proxify-crawler" in flow.request.headers:
             return
 
         self.logger.info(

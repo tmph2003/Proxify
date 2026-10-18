@@ -36,7 +36,7 @@ class RequestStorage:
 
     def __init__(self, db_dsn: str = DB_DSN, retention_days: Optional[int] = None):
         self.db_dsn = db_dsn
-        self.db_integration_enabled = os.getenv("DB_INTEGRATION_ENABLED", "true").lower() == "true"
+        self.db_integration_enabled = os.getenv("DB_INTEGRATION_ENABLED", "false").lower() == "true"
         self.db_allowed_domains = []
         self.retention_days = parse_retention_days(
             retention_days if retention_days is not None else os.getenv("RECORD_RETENTION_DAYS", os.getenv("RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))),

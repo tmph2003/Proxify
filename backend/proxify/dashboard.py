@@ -258,17 +258,5 @@ class Dashboard:
         finally:
             await manager.close()
 
-    async def _handle_stealth_stats(self, request: web.Request) -> web.Response:
-        """Return stealth engine statistics."""
-        from proxify.platforms.facebook.crawler import _crawler_manager as crawler_mgr
-
-        stats = {}
-        if crawler_mgr:
-            stats["crawler"] = crawler_mgr.stats
-        else:
-            stats["crawler"] = {"status": "not_initialized"}
-
-        return web.json_response({"status": "ok", "data": stats})
-
     def get_app(self) -> web.Application:
         return self.app

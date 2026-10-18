@@ -45,8 +45,8 @@ REQUEST_TIMEOUT = float(os.getenv("STEALTH_TIMEOUT", "30.0"))
 SOFT_BLOCK_SIGNATURES = [
     b"checkpoint",
     b"captcha",
-    b"_Spin_r",  # Facebook challenge redirect
-    b'"require":["ServerRedirect"',  # Facebook server-side redirect to checkpoint
+    b"_Spin_r",
+    b'"require":["ServerRedirect"',
     b"Please verify you are a human",
     b"Access denied",
     b"challenge-platform",       # Cloudflare
@@ -69,7 +69,7 @@ HEADERS_TO_STRIP = frozenset([
     ":scheme",
 ])
 
-# Headers that curl_cffi auto-generates or Facebook automation markers
+# Client-hint headers that curl_cffi auto-generates
 BROWSER_HINT_HEADERS = frozenset([
     "sec-ch-ua",
     "sec-ch-ua-full-version-list",
@@ -78,9 +78,6 @@ BROWSER_HINT_HEADERS = frozenset([
     "sec-ch-ua-platform",
     "sec-ch-ua-platform-version",
     "sec-ch-prefers-color-scheme",
-    "x-fb-friendly-name",
-    "x-asbd-id",
-    "x-fb-lsd",
 ])
 
 
@@ -113,10 +110,6 @@ def is_soft_blocked(status_code: int, content: bytes, headers: dict = None, url:
     if headers is None:
         headers = {}
 
-    # Skip checking static assets from CDNs
-    if "fbcdn.net" in url:
-        return False
-
     # Check for Cloudflare challenge header
     cf_mitigated = headers.get("cf-mitigated", "")
     if "challenge" in cf_mitigated.lower():
@@ -140,7 +133,7 @@ def is_retryable_status(status_code: int) -> bool:
     return status_code in (429, 503, 502, 520, 521, 522, 523, 524)
 
 class AccountCheckpointError(Exception):
-    """Raised when Facebook returns a checkpoint/challenge page."""
+    """Raised when an upstream endpoint returns a checkpoint/challenge page."""
     pass
 
 class ProxyBlockedError(Exception):
@@ -263,7 +256,6 @@ class StealthSessionManager:
         
         # FIX OS FINGERPRINT MISMATCH: curl_cffi defaults to macOS for chrome120.
         # We must dynamically adjust Sec-Ch-Ua and Sec-Ch-Ua-Platform based on the User-Agent.
-        # This prevents Facebook Checkpoint triggers (Error 1357001).
         ua = clean_headers.get("user-agent") or clean_headers.get("User-Agent") or ""
         if ua:
             import re

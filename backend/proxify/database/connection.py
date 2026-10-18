@@ -3,8 +3,6 @@ Database Connection Pool — quản lý kết nối PostgreSQL.
 
 Sử dụng ThreadedConnectionPool cho multi-threaded access.
 Context manager tự động return connection về pool.
-
-Shared across all platforms (zalo, facebook, etc.).
 """
 
 import logging
@@ -21,7 +19,7 @@ DB_DSN = os.getenv("DB_DSN", "postgresql://proxify_user:proxify_pass@localhost:5
 
 
 class DatabasePool:
-    """Thread-safe PostgreSQL connection pool — shared across all platforms."""
+    """Thread-safe PostgreSQL connection pool."""
 
     def __init__(self, dsn: str = DB_DSN, min_conn: int = 1, max_conn: int = 5):
         self._dsn = dsn
@@ -109,7 +107,7 @@ class DatabasePool:
         """Tạo schema nếu chưa tồn tại.
 
         Args:
-            schema_name: Tên schema (e.g., 'zalo', 'facebook')
+            schema_name: Tên schema (e.g., 'core')
         """
         try:
             with self.cursor() as cur:

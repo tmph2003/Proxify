@@ -191,24 +191,6 @@ async def test_proxy_router_port_tagged_host_matches_search_and_stream_and_ignor
     assert flow_stream.response.stream is True
 
 
-def test_youtube_utils_strict_domain_matching_rejects_lookalikes():
-    from proxify.utils.youtube_utils import is_youtube_ad_request
-
-    # Third-party lookalike domains MUST NOT be flagged as YouTube ads
-    assert is_youtube_ad_request("https://fake-doubleclick.net/test", "fake-doubleclick.net") is False
-    assert is_youtube_ad_request("https://notgoogleadservices.com/ad", "notgoogleadservices.com") is False
-    assert is_youtube_ad_request("https://evilgooglesyndication.com", "evilgooglesyndication.com") is False
-    assert is_youtube_ad_request("https://notyoutube.com/api/stats", "notyoutube.com") is False
-
-    # Legitimate ad networks must still be flagged
-    assert is_youtube_ad_request("https://googleads.g.doubleclick.net/pagead/", "googleads.g.doubleclick.net") is True
-    assert is_youtube_ad_request("https://pagead2.googlesyndication.com/pagead/", "pagead2.googlesyndication.com") is True
-    assert is_youtube_ad_request("https://www.googleadservices.com/pagead/", "www.googleadservices.com") is True
-
-    # Host with port
-    assert is_youtube_ad_request("https://googleads.g.doubleclick.net:443/pagead/", "googleads.g.doubleclick.net:443") is True
-
-
 @pytest.mark.anyio
 async def test_dashboard_toggle_db_invalid_json_handled():
     mock_storage = MagicMock()
@@ -236,10 +218,10 @@ def test_database_pool_recreates_closed_pool():
 def test_router_search_deduplicates_interceptors_across_parent_and_child_domains():
     router = ProxyRouter()
     mock_mutator = MagicMock()
-    mock_mutator.target_domains = ["zalo.me", "chat.zalo.me"]
+    mock_mutator.target_domains = ["example.com", "sub.example.com"]
     router.register_mutator(mock_mutator)
 
-    obs, muts = router._search("chat.zalo.me")
+    obs, muts = router._search("sub.example.com")
     assert muts.count(mock_mutator) == 1
     assert len(muts) == 1
 
@@ -270,44 +252,13 @@ async def test_extension_context_accumulates_target_domains():
 
 
 @pytest.mark.anyio
-async def test_youtube_extension_preserves_target_domains_and_blocks_youtube_ads():
-    from extensions.youtube.extension import YouTubeExtension
-    from proxify.sdk.context import ExtensionContext
-    from mitmproxy.test import tflow
-
+async def test_proxy_router_record_filters():
     router = ProxyRouter()
-    ctx = ExtensionContext(
-        "youtube",
-        router=router,
-        dashboard_app=MagicMock(),
-        db_manager=MagicMock(),
-        sync_db_pool=MagicMock(),
-        worker=MagicMock(),
-        filter_instance=MagicMock(),
-        event_bus=MagicMock(),
-        storage=MagicMock(),
-    )
-    ext = YouTubeExtension()
-    await ext.initialize(ctx)
+    router.register_record_filter(lambda d, p, u: d == "telemetry.example.com" or "/heartbeat" in p)
 
-    # Fetch YouTubePlugin mutator registered at youtube.com
-    _, matched = router._search("www.youtube.com")
-    assert len(matched) >= 1
-    yt_plugin = matched[0]
-
-    # Target domains must contain youtube.com, not just adservice.google.com
-    assert "youtube.com" in yt_plugin.target_domains
-    assert "adservice.google.com" in yt_plugin.target_domains
-
-    # An ad request to www.youtube.com MUST be blocked
-    flow = tflow.tflow()
-    flow.request.host = "www.youtube.com"
-    flow.request.url = "https://www.youtube.com/pagead/123"
-    await yt_plugin.on_request(flow)
-
-    assert flow.metadata.get("ad_blocked") is True
-    assert flow.response is not None
-    assert flow.response.status_code == 204
+    assert router.should_skip_record("telemetry.example.com", "/v1/ping", "https://telemetry.example.com/v1/ping") is True
+    assert router.should_skip_record("api.example.com", "/v1/heartbeat", "https://api.example.com/v1/heartbeat") is True
+    assert router.should_skip_record("api.example.com", "/v1/orders", "https://api.example.com/v1/orders") is False
 
 
 @pytest.mark.anyio
@@ -328,72 +279,46 @@ async def test_proxy_addon_catches_unhandled_exceptions_gracefully():
     await addon.response(dummy_flow)
 
 
-def test_inverted_scope_ignore_regex_strict_isolation():
-    """Verify that mitmproxy allow_hosts & ignore_hosts accurately intercept
-    YouTube, Facebook, Zalo, and ad networks, while passing through all other web traffic."""
-    import re
+@pytest.mark.anyio
+async def test_proxy_router_smart_js_and_css_streaming():
+    """Verify .css is always streamed and .js is streamed unless a mutator with mutates_js=True matches."""
+    router = ProxyRouter()
 
-    ALLOW_DOMAINS = [
-        r'(?:^|\.)youtube\.com(?::|$)',
-        r'(?:^|\.)youtubei\.googleapis\.com(?::|$)',
-        r'(?:^|\.)facebook\.com(?::|$)',
-        r'(?:^|\.)messenger\.com(?::|$)',
-        r'(?:^|\.)zalo\.me(?::|$)',
-        r'(?:^|\.)doubleclick\.net(?::|$)',
-        r'(?:^|\.)googleadservices\.com(?::|$)',
-        r'(?:^|\.)googlesyndication\.com(?::|$)',
-    ]
+    non_js_mutator = MagicMock()
+    non_js_mutator.target_domains = ["video.example.com"]
+    non_js_mutator.mutates_js = False
+    router.register_mutator(non_js_mutator)
 
-    IGNORE_DOMAINS = [
-        r'(?:^|\.)googlevideo\.com(?::|$)',
-        r'(?:^|\.)c\.youtube\.com(?::|$)',
-        r'(?:^|\.)accounts\.youtube\.com(?::|$)',
-        r'(?:^|\.)signaler-pa\.youtube\.com(?::|$)',
-    ]
+    js_mutator = MagicMock()
+    js_mutator.target_domains = ["app.example.com"]
+    js_mutator.mutates_js = True
+    router.register_mutator(js_mutator)
 
-    def is_mitmproxy_ignored(hostnames: list[str]) -> bool:
-        # Mitmproxy NextLayer logic:
-        # 1. Check allow_hosts: if not allowed, ignored = True (TCP passthrough)
-        not_allowed = not any(
-            re.search(rex, host, re.IGNORECASE)
-            for host in hostnames
-            for rex in ALLOW_DOMAINS
-        )
-        if not_allowed:
-            return True
-        # 2. Check ignore_hosts: if ignored, ignored = True (TCP passthrough)
-        ignored = any(
-            re.search(rex, host, re.IGNORECASE)
-            for host in hostnames
-            for rex in IGNORE_DOMAINS
-        )
-        return bool(ignored)
+    def make_flow(url: str, host: str, content_type: str = "application/javascript"):
+        f = MagicMock()
+        f.request.pretty_url = url
+        f.request.pretty_host = host
+        f.response.headers = {"content-type": content_type}
+        f.response.stream = False
+        return f
 
-    # 1. Target Domains MUST NOT be ignored (they must be intercepted)
-    assert is_mitmproxy_ignored(["142.251.155.4:443", "www.youtube.com:443"]) is False
-    assert is_mitmproxy_ignored(["142.251.155.4:443", "youtube.com:443"]) is False
-    assert is_mitmproxy_ignored(["142.251.155.4:443", "m.youtube.com:443"]) is False
-    assert is_mitmproxy_ignored(["142.250.197.10:443", "youtubei.googleapis.com:443"]) is False
-    assert is_mitmproxy_ignored(["157.240.22.35:443", "www.facebook.com:443"]) is False
-    assert is_mitmproxy_ignored(["49.213.95.122:443", "chat.zalo.me:443"]) is False
-    assert is_mitmproxy_ignored(["49.213.95.122:443", "tt-profile-wpa.chat.zalo.me:443"]) is False
-    assert is_mitmproxy_ignored(["142.250.197.226:443", "googleads.g.doubleclick.net:443"]) is False
-    assert is_mitmproxy_ignored(["142.250.197.130:443", "pagead2.googlesyndication.com:443"]) is False
-    assert is_mitmproxy_ignored(["142.250.197.130:443", "www.googleadservices.com:443"]) is False
+    # 1. General web JS bundles MUST stream directly (0 RAM buffering)
+    f_gh = make_flow("https://github.githubassets.com/assets/app.js", "github.githubassets.com")
+    await router.route_responseheaders(f_gh)
+    assert f_gh.response.stream is True
 
-    # 2. General Internet & Internal Systems MUST be ignored (zero-overhead TCP passthrough)
-    assert is_mitmproxy_ignored(["142.250.198.46:443", "c.youtube.com:443"]) is True
-    assert is_mitmproxy_ignored(["142.250.198.46:443", "accounts.youtube.com:443"]) is True
-    assert is_mitmproxy_ignored(["142.250.198.46:443", "googlevideo.com:443"]) is True
-    assert is_mitmproxy_ignored(["142.250.198.46:443", "rr1---sn-n4v7snee.googlevideo.com:443"]) is True
-    assert is_mitmproxy_ignored(["140.82.121.4:443", "github.com:443"]) is True
-    assert is_mitmproxy_ignored(["142.250.198.142:443", "mail.google.com:443"]) is True
-    assert is_mitmproxy_ignored(["103.1.209.52:443", "cohoichoai.com:443"]) is True
-    assert is_mitmproxy_ignored(["172.66.0.218:443", "speed.cloudflare.com:443"]) is True
-    assert is_mitmproxy_ignored(["172.64.155.209:443", "chatgpt.com:443"]) is True
-    assert is_mitmproxy_ignored(["172.16.100.130:443", "ks.sunhouse.com.vn:443"]) is True
-    assert is_mitmproxy_ignored(["103.14.168.10:443", "shopee.vn:443"]) is True
-    assert is_mitmproxy_ignored(["111.65.250.10:443", "dantri.com.vn:443"]) is True
+    # 2. Mutator with mutates_js=False MUST still stream .js directly
+    f_vid = make_flow("https://video.example.com/player/base.js", "video.example.com")
+    await router.route_responseheaders(f_vid)
+    assert f_vid.response.stream is True
 
+    # 3. CSS stylesheets MUST stream unconditionally even on js_mutator domains
+    f_css = make_flow("https://app.example.com/styles/main.css", "app.example.com", "text/css")
+    await router.route_responseheaders(f_css)
+    assert f_css.response.stream is True
 
+    # 4. Mutator with mutates_js=True MUST NOT stream .js (so mutator can inspect/modify body)
+    f_app = make_flow("https://app.example.com/js/app.js", "app.example.com")
+    await router.route_responseheaders(f_app)
+    assert f_app.response.stream is False
 

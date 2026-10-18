@@ -14,21 +14,21 @@ _STREAM_EXTENSIONS = (
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".avif",
     ".woff", ".woff2", ".ttf", ".eot", ".otf",
     ".mp4", ".mp3", ".wav", ".ogg", ".webm", ".avi", ".mkv", ".flv",
-    ".map",  # source maps
+    ".css", ".map",  # stylesheets & source maps (never modified by any plugin)
 )
 
-# Content-types that are safe to stream (no plugin ever modifies these)
-_STREAM_CONTENT_TYPES = ("image/", "font/", "application/font", "application/x-font")
+# Content-types that are safe to stream unconditionally (no plugin ever modifies these)
+_STREAM_CONTENT_TYPES = ("image/", "font/", "application/font", "application/x-font", "text/css")
+
+# JavaScript extensions and content-types that should be streamed whenever no mutator
+# needs to inspect/rewrite JS on that domain (eliminates store-and-forward lag on 1-4MB JS bundles).
+_JS_EXTENSIONS = (".js", ".mjs")
+_JS_CONTENT_TYPES = ("application/javascript", "text/javascript", "application/x-javascript")
 
 # Domains whose responses should ALWAYS be streamed (video CDNs, static assets, etc.)
-# These domains serve large binary data that must never be buffered.
+# Extensions can register additional domains via `context.register_stream_domains(...)`.
 _STREAM_DOMAINS = (
     "googlevideo.com",
-    "tiktokcdn.com",
-    "byteoversea.com",
-    "ibyteimg.com",
-    "fbcdn.net",
-    "fbsbx.com",
 )
 
 class TrieNode:
@@ -40,7 +40,7 @@ class TrieNode:
 class ProxyRouter:
     """
     O(depth) Radix Trie Router for matching domains (including wildcards/subdomains).
-    Domains are inserted in reverse order (e.g., com -> facebook -> api).
+    Domains are inserted in reverse order (e.g., com -> example -> api).
     """
     def __init__(self, ignored_hosts: Optional[List[str]] = None):
         self.root = TrieNode()
@@ -48,6 +48,20 @@ class ProxyRouter:
         self.global_mutators: List[IMutatorInterceptor] = []
         self.ignored_hosts: List[str] = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in (ignored_hosts or []) if h.strip()]
         self.stream_domains: Set[str] = {d.split(":", 1)[0].strip().lower() for d in _STREAM_DOMAINS}
+        self.record_filters: List = []
+
+    def register_record_filter(self, predicate) -> None:
+        if callable(predicate) and predicate not in self.record_filters:
+            self.record_filters.append(predicate)
+
+    def should_skip_record(self, domain: str, path: str, url: str = "") -> bool:
+        for pred in self.record_filters:
+            try:
+                if pred(domain, path, url):
+                    return True
+            except Exception as e:
+                logger.error(f"Record filter error: {e}")
+        return False
 
     def register_stream_domains(self, domains) -> None:
         self.stream_domains.update(d.split(":", 1)[0].strip().lower() for d in domains if d)
@@ -193,9 +207,7 @@ class ProxyRouter:
             flow.response.stream = True
             return
 
-        # 4. Stream static assets by URL extension (images, fonts, source maps, media)
-        #    NOTE: .css and .js are intentionally EXCLUDED because mutator plugins
-        #    (e.g., ZaloPlugin) may need to read and modify the response body.
+        # 4. Stream static assets by URL extension (images, fonts, stylesheets, source maps, media)
         url = flow.request.pretty_url or ""
         path = urlparse(url).path.lower()
         if path.endswith(_STREAM_EXTENSIONS):
@@ -216,6 +228,14 @@ class ProxyRouter:
         if self.is_ignored(raw_host):
             return
         observers, mutators = self._search(raw_host)
+
+        # 6. Stream JavaScript bundles (.js/.mjs) when no mutator for this domain requires JS body rewriting.
+        is_js = path.endswith(_JS_EXTENSIONS) or any(content_type.startswith(ct) for ct in _JS_CONTENT_TYPES)
+        if is_js:
+            needs_js_mutation = any(getattr(m, "mutates_js", True) for m in mutators)
+            if not needs_js_mutation:
+                flow.response.stream = True
+                return
         
         for obs in observers:
             if hasattr(obs, 'handle_responseheaders'):

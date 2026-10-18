@@ -5,7 +5,7 @@ from typing import Tuple, Optional
 def parse_graphql_request(request_body: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Parse a GraphQL request body and extract operation name, doc ID, and variables.
-    Supports Facebook's URL-encoded format and standard JSON format.
+    Supports both standard JSON format and URL-encoded GraphQL format.
     
     Returns:
         (operation_name, doc_id, variables)
@@ -18,7 +18,7 @@ def parse_graphql_request(request_body: str) -> Tuple[Optional[str], Optional[st
         return None, None, None
 
     try:
-        # 1. Try Facebook's URL-encoded GraphQL format
+        # 1. Try URL-encoded GraphQL format
         if "fb_api_req_friendly_name=" in request_body or "doc_id=" in request_body:
             parsed = parse_qs(request_body)
             operation_name = parsed.get("fb_api_req_friendly_name", [None])[0]

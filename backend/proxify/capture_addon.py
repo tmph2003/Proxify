@@ -131,12 +131,7 @@ class CaptureAddon:
         path = parsed.path or ""
         
         # If it's a static extension, stream it to save RAM
-        # BUT: skip streaming for Zalo .js files — the Zalo plugin needs
-        # to read and modify these files to inject JS hooks.
         if path.lower().endswith(IGNORE_EXTENSIONS_TUPLE):
-            domain = flow.request.pretty_host
-            if path.lower().endswith(".js") and "zalo" in domain:
-                return  # Don't stream — let Zalo plugin modify the JS
             flow.response.stream = True
             return
 
@@ -158,9 +153,10 @@ class CaptureAddon:
             parsed = urlparse(flow.request.pretty_url)
 
             # Determine whether DB save is allowed
-            db_save = True
-            if self._is_db_enabled_fn and not self._is_db_enabled_fn():
-                db_save = False
+            if self._is_db_enabled_fn is not None:
+                db_save = bool(self._is_db_enabled_fn())
+            else:
+                db_save = getattr(self.storage, "db_integration_enabled", False)
 
             if db_save:
                 allowed_domains = getattr(self.storage, 'db_allowed_domains', [])

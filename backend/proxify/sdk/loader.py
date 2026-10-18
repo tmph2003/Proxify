@@ -32,13 +32,17 @@ class ExtensionLoader:
     ):
         env_dir = os.getenv("EXTENSIONS_DIR")
         if not env_dir:
+            repo_root = Path(__file__).resolve().parent.parent.parent.parent
+            private_ext = repo_root / "private" / "extensions"
             local_ext = Path(__file__).resolve().parent.parent.parent / "extensions"
-            if local_ext.exists() and local_ext.is_dir():
+            if private_ext.exists() and private_ext.is_dir():
+                env_dir = str(private_ext)
+            elif local_ext.exists() and local_ext.is_dir():
                 env_dir = str(local_ext)
             elif Path("/app/extensions").exists():
                 env_dir = "/app/extensions"
             else:
-                env_dir = str(local_ext)
+                env_dir = str(private_ext)
         self.extensions_dir = Path(extensions_dir or env_dir)
 
         # Support both DISABLE_EXTENSIONS and PROXIFY_DISABLE_EXTENSIONS
@@ -79,10 +83,15 @@ class ExtensionLoader:
             self._register_extensions_api(dashboard_app)
             return []
 
-        # Add extensions directory to sys.path so extensions can import their internal packages
+        # Add extensions directory and optional sibling shared directory to sys.path
         ext_dir_str = str(self.extensions_dir.resolve())
         if ext_dir_str not in sys.path:
             sys.path.insert(0, ext_dir_str)
+        shared_dir = self.extensions_dir.resolve().parent / "shared"
+        if shared_dir.exists() and shared_dir.is_dir():
+            shared_str = str(shared_dir)
+            if shared_str not in sys.path:
+                sys.path.insert(0, shared_str)
 
         entries = sorted(list(self.extensions_dir.iterdir()))
         for entry in entries:
@@ -167,18 +176,6 @@ class ExtensionLoader:
             spec = importlib.util.spec_from_file_location(module_name, target_file)
             if spec is None or spec.loader is None:
                 return None
-
-            # Alias virtual packages so legacy/internal imports work seamlessly
-            for prefix in ("proxify.platforms", "proxify.plugins"):
-                pkg_alias = f"{prefix}.{dir_name}"
-                if pkg_alias not in sys.modules:
-                    pkg = types.ModuleType(pkg_alias)
-                    pkg.__path__ = [dir_path]
-                    init_f = directory / "__init__.py"
-                    if init_f.exists():
-                        pkg.__file__ = str(init_f.resolve())
-                    pkg.__package__ = pkg_alias
-                    sys.modules[pkg_alias] = pkg
 
             module = importlib.util.module_from_spec(spec)
             module.__package__ = dir_name

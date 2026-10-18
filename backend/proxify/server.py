@@ -89,17 +89,20 @@ class V1GlobalObserver:
     """Wraps V1 interceptors to bridge mitmproxy flows to the legacy Global Dashboard."""
     target_domains = [] # Listen to all domains
     
-    def __init__(self, broadcast_fn, storage, ignored_hosts: list[str] = None):
+    def __init__(self, broadcast_fn, storage, ignored_hosts: list[str] = None, router: ProxyRouter = None):
         from proxify.core.listeners import DashboardBroadcaster, DatabaseWriter
         self.broadcaster = DashboardBroadcaster(broadcast_fn)
         self.db_writer = DatabaseWriter(storage)
         self.ignored_hosts = [h.strip().lower() for h in (ignored_hosts or []) if h.strip()]
+        self.router = router
         
     async def handle_request(self, flow):
         pass
         
     async def handle_response(self, flow):
         if not flow or not flow.request or not flow.response:
+            return
+        if flow.metadata.get("ad_blocked"):
             return
         raw_host = flow.request.pretty_host or ""
         domain = raw_host.split(":", 1)[0].strip().lower()
@@ -111,17 +114,10 @@ class V1GlobalObserver:
         ):
             return
 
-        # Skip noisy high-frequency polling and telemetry endpoints from DB storage and WebSocket broadcast
+        # Skip requests matched by any registered record filter (e.g., streaming/telemetry noise)
         path = (flow.request.path or "").lower()
-        if any(path.startswith(prefix) for prefix in (
-            "/api/stats/",
-            "/youtubei/v1/live_chat/",
-            "/youtubei/v1/updated_metadata",
-            "/youtubei/v1/log_event",
-            "/punctual/",
-            "/generate_204",
-            "/ptracking",
-        )):
+        url = flow.request.pretty_url or ""
+        if self.router and self.router.should_skip_record(domain, path, url):
             return
 
         # Determine whether DB save is allowed based on V1 storage settings
@@ -157,65 +153,55 @@ async def run_server():
     worker = BackgroundWorker(db_manager)
     worker.start()
 
-    # 2.5 Strict Scope: Native allow_hosts for target platforms & ignore_hosts for explicit sub-bypasses
-    # Clean Architecture & Anti-Bottleneck Principle:
-    # Mitmproxy natively evaluates `allow_hosts` across all candidate hostnames/SNI.
-    # Connections are ONLY intercepted if their hostname or SNI matches an allow_hosts pattern.
-    # 100% of all other web traffic (99.9% of the internet) automatically passes
-    # through at native wire speed via Mitmproxy's raw TCP Passthrough (zero TLS decryption,
-    # zero Python memory buffering, zero database/websocket serialization).
+    # 2.5 Universal Capture Scope: Intercept all web traffic by default (or restrict if INTERCEPT_DOMAINS is explicitly set)
+    # High-bandwidth video CDNs and strict auth endpoints remain in explicit_bypasses for zero-latency streaming and login safety.
     import re
 
-    DEFAULT_TARGET_DOMAINS = [
-        r'(?:^|\.)youtube\.com(?::|$)',
-        r'(?:^|\.)youtubei\.googleapis\.com(?::|$)',
-        r'(?:^|\.)facebook\.com(?::|$)',
-        r'(?:^|\.)messenger\.com(?::|$)',
-        r'(?:^|\.)zalo\.me(?::|$)',
-        r'(?:^|\.)doubleclick\.net(?::|$)',
-        r'(?:^|\.)googleadservices\.com(?::|$)',
-        r'(?:^|\.)googlesyndication\.com(?::|$)',
-    ]
-
     custom_intercept = os.getenv("INTERCEPT_DOMAINS", "").strip()
+    allow_patterns = []
     if custom_intercept:
         for d in custom_intercept.split(","):
             d = d.strip()
             if d:
-                DEFAULT_TARGET_DOMAINS.append(rf'(?:^|\.){re.escape(d)}(?::|$)')
+                allow_patterns.append(rf'(?:^|\.){re.escape(d)}(?::|$)')
 
-    allow_patterns = DEFAULT_TARGET_DOMAINS
-
-    # Explicit bypass safety net for high-bandwidth/auth domains that should never be intercepted
-    # even within allowed domains:
+    # Explicit bypass safety net for high-bandwidth/auth domains that should never be TLS-intercepted:
     explicit_bypasses = [
         r'(?:^|\.)googlevideo\.com(?::|$)',
         r'(?:^|\.)c\.youtube\.com(?::|$)',
         r'(?:^|\.)accounts\.youtube\.com(?::|$)',
         r'(?:^|\.)signaler-pa\.youtube\.com(?::|$)',
+        r'(?:^|\.)accounts\.google\.com(?::|$)',
+        r'(?:^|\.)clients\d*\.google\.com(?::|$)',
+        r'(?:^|\.)gvt[123]\.com(?::|$)',
     ]
 
-    # Also parse IGNORE_HOSTS for Router application layer safety net
+    # Also parse IGNORE_HOSTS for Router application layer safety net (only essential background/CDN noise by default)
     raw_ignore = os.getenv(
         "IGNORE_HOSTS",
-        "googlevideo.com,c.youtube.com,accounts.youtube.com,signaler-pa.youtube.com,captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*,gvt1.com,gvt3.com,fastly-edge.com,play.google.com,googleusercontent.com,google.com.vn,chatgpt.com,openai.com,apple.com,vscode-cdn.net,exp-tas.com,gravatar.com,garena.com,garena.vn,garenanow.com,gopapi.io,ea.com,origin.com,nexon.com,nexon.net,riotgames.com,leagueoflegends.com,steampowered.com,steamcommunity.com,epicgames.com,battlenet.com,blizzard.com",
+        "googlevideo.com,c.youtube.com,accounts.youtube.com,signaler-pa.youtube.com,accounts.google.com,clients6.google.com,client-channel.google.com,gvt1.com,gvt2.com,gvt3.com,1e100.net,nel.goog,msftncsi.com,windowsupdate.com",
     )
     ignored_hosts = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in raw_ignore.split(",") if h.strip()]
-    logger.info("🛡️ Traffic Scope: allow_hosts enabled for YouTube, Facebook, Zalo, and ad networks. All other traffic is TCP Passthrough.")
+    if allow_patterns:
+        logger.info(f"🛡️ Traffic Scope: allow_hosts restricted to {len(allow_patterns)} custom patterns.")
+    else:
+        logger.info("🌐 Traffic Scope: Universal Capture enabled across all domains (excluding video CDNs & auth bypasses).")
 
     # 3. Initialize Router
     router = ProxyRouter(ignored_hosts=ignored_hosts)
 
     # 4. Start Mitmproxy in the same event loop
     proxy_port = int(os.environ.get("PROXY_PORT", 8080))
-    opts = Options(
+    opts_kwargs = dict(
         listen_host="0.0.0.0",
         listen_port=proxy_port,
         ssl_insecure=True,
         http2=True,
-        allow_hosts=allow_patterns,
         ignore_hosts=explicit_bypasses,
     )
+    if allow_patterns:
+        opts_kwargs["allow_hosts"] = allow_patterns
+    opts = Options(**opts_kwargs)
     master = DumpMaster(opts, with_termlog=True, with_dumper=False)
     master.addons.add(ProxyAddon(router))
 
@@ -244,7 +230,7 @@ async def run_server():
         _deferred_broadcast({"req_uuid": req_uuid, "row_id": row_id}, msg_type="update_id")
     v1_bus.subscribe("db_row_created", on_db_row_created)
             
-    global_observer = V1GlobalObserver(_deferred_broadcast, storage, ignored_hosts=ignored_hosts)
+    global_observer = V1GlobalObserver(_deferred_broadcast, storage, ignored_hosts=ignored_hosts, router=router)
     router.register_observer(global_observer)
 
     # 6. Discover and load modular extensions before runner setup (aiohttp routes freeze at setup)
