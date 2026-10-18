@@ -13,14 +13,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. Cài đặt Playwright OS dependencies
-RUN pip install playwright && playwright install-deps chromium
-
-# 4. Copy và cài đặt CloakBrowser
-COPY CloakBrowser /app/CloakBrowser
-RUN pip install -e /app/CloakBrowser
-
-# 5. Copy toàn bộ mã nguồn Proxify
+# 3. Copy toàn bộ mã nguồn Proxify
 COPY . /app
 RUN pip install -e .
 

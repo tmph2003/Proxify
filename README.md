@@ -4,7 +4,7 @@
     <br>
     Proxify
     <br>
-    <small>The Ultimate Multi-Platform Request Capture & Reverse-Engineering Framework</small>
+    <small>High-Performance HTTP/HTTPS/WebSocket Request Tracker & Traffic Inspection Framework</small>
 </h1>
 
 <p align="center">
@@ -29,7 +29,7 @@
     &middot;
     <a href="#core-features"><strong>Core Features</strong></a>
     &middot;
-    <a href="#platforms"><strong>Platforms & Plugins</strong></a>
+    <a href="#extension-sdk"><strong>Extension SDK</strong></a>
     &middot;
     <a href="#quick-start"><strong>Quick Start</strong></a>
     &middot;
@@ -42,61 +42,44 @@
 
 ## 🌟 Overview
 
-**Proxify** is a comprehensive framework engineered for **traffic interception, reverse-engineering, and automated data extraction** across HTTP, HTTPS, HTTP/2, and WebSocket protocols.
+**Proxify** is a lightweight, high-performance **HTTP, HTTPS, HTTP/2, and WebSocket request tracking and traffic inspection framework**.
 
-Built on the industrial-grade **Mitmproxy 10** engine, Proxify seamlessly unites:
-1. **Multi-Threaded Proxy Core**: Silent interception, HTTPS TLS decryption, and high-throughput raw traffic ingestion into PostgreSQL.
-2. **Anti-Bot & WAF Bypass Engine**: Intelligent detection and evasion of modern bot protections (Cloudflare Turnstile, Facebook Checkpoint, Akamai) via TLS/JA3 impersonation and a Chrome Extension First-Party Tab Bridge.
-3. **Pluggable Multi-Platform Architecture**: Out-of-the-box support for **Facebook**, **Zalo**, and **YouTube**, alongside a dynamic plugin system ready to scale to TikTok, Shopee, Telegram, and beyond.
-4. **Interactive Real-Time Dashboard**: A modern React-powered UI featuring a Live Traffic Inspector (akin to Fiddler/Charles/Burp Suite), platform-specific management consoles, session persistence, and crawling controllers.
+Built on top of **Mitmproxy 10**, **AsyncIO**, and **PostgreSQL**, Proxify is designed as a clean, developer-first observability proxy that unites:
+1. **Asynchronous Request Tracking Core**: Non-blocking HTTPS/TLS interception, GraphQL operation parsing, and batched raw traffic ingestion into PostgreSQL.
+2. **TLS/JA3 Fingerprint Spoofing**: Native `curl_cffi` integration that disguises upstream client connections as genuine Chrome/Safari TLS handshakes (`chrome131`) so modern WAF-protected web apps (Cloudflare, Akamai) load seamlessly during traffic inspection.
+3. **1-Click Chrome Extension Controller**: A minimal Manifest V3 browser extension for toggling proxy routing (`127.0.0.1:8080`) and configuring live database capture filters per domain.
+4. **Interactive Real-Time Dashboard**: A modern React + TypeScript web interface featuring a Live Traffic Inspector (headers, payloads, status codes, latency, and GraphQL operation names), domain filtering, and retention policies.
 
 ---
 
 ## 🛡️ Core Features
 
-### 1. Stealth MITM Interception & Decryption
-- **Full HTTPS/TLS Decryption**: Generates and manages trusted CA root certificates to decrypt encrypted traffic across desktop browsers, mobile apps (Android/iOS), and emulators.
-- **HTTP/2 & WebSocket Streaming**: Native handling of multiplexed HTTP/2 frames and persistent WebSocket duplex streams (e.g., Zalo chat sockets, Facebook Lightspeed).
-- **Asynchronous Traffic Storage**: Offloads raw requests/responses to an asynchronous PostgreSQL pipeline (`TrafficStorageWorker`) with zero latency impact on live browsing.
-- **Clean Logging Engine**: Employs `PollingEndpointFilter` to silence routine `200 OK` polling noise, delivering a tranquil, high-signal console.
+### 1. High-Throughput Traffic Interception & Tracking
+- **Full HTTPS/TLS Inspection**: Generates and manages local CA root certificates to inspect encrypted traffic across desktop browsers, CLI tools, and mobile emulators.
+- **HTTP/2 & WebSocket Support**: Captures multiplexed HTTP/2 streams and full-duplex WebSocket frames without degrading connection stability.
+- **Asynchronous Batch Storage (`TrafficStorageWorker`)**: Buffers and writes captured requests/responses to PostgreSQL in background batches (`COMMIT_BATCH_SIZE` / `COMMIT_INTERVAL`), ensuring zero latency overhead on live browsing.
+- **GraphQL Operation Detection**: Automatically parses GraphQL request bodies (`utils/graphql.py`) to extract `operationName` and index queries/mutations for instant filtering.
+- **Smart Static & Media Streaming**: Automatically streams large media segments, `.css` stylesheets, and unmodified `.js` bundles directly to the client with zero RAM buffering.
 
-### 2. Anti-Bot Bypass & Stealth Suite
-- **Soft-Block Detection (`stealth.py`)**: Automatically detects Cloudflare challenge pages, CAPTCHAs, and 429/503 rate-limit states to trigger intelligent exponential backoff.
-- **Chrome Extension First-Party Tab Bridge**: Executes requests directly within the user's authentic Facebook/site browser tab, fully inheriting real cookies, local IP, and browser context to **eliminate 1357001 logout errors**.
-- **Circuit Breaker Resilience**: Prevents cascading failures and server bans by auto-throttling requests when upstream targets show distress.
+### 2. TLS Fingerprint Spoofing & WAF Compatibility
+- **Browser TLS Impersonation (`plugins/tls_spoofer.py`)**: Standard Python/Mitmproxy TLS handshakes are frequently blocked by Cloudflare or Akamai JA3/JA4 fingerprinting. Proxify's `TLSSpooferPlugin` replays requests through `curl_cffi` (`impersonate="chrome131"`) for configured `SPOOF_DOMAINS` so pages load normally while being tracked.
+- **Soft-Block & Retry Engine (`utils/stealth.py`)**: Detects Cloudflare challenge headers, rate limits (`429`/`503`), and transient upstream errors with automatic exponential backoff.
 
-### 3. Hot-Pluggable Dynamic Plugin System
-- Follows the **Open/Closed Principle**: Extend Proxify to any new service simply by subclassing `BasePlugin` and adding the `@register_plugin("name")` decorator.
-- Lifecycle hooks available: `on_request()`, `on_response()`, `on_websocket_message()`, and `on_error()`.
+### 3. 1-Click Chrome Extension (`backend/chrome_extension/`)
+- **Instant Proxy Toggle**: Route or bypass Chrome traffic through Proxify (`127.0.0.1:8080`) with a single click and live status badge (`ON`/`OFF`).
+- **Database Capture Control**: Enable or pause PostgreSQL traffic recording on the fly and specify comma-separated domain allowlists (`db_allowed_domains`) directly from the popup.
+- **Strict Least-Privilege Manifest**: Requires only `proxy` and `storage` permissions—no intrusive content scripts or cookie readers.
 
 ---
 
-## 🌐 Supported Platforms & Plugins
+## 🔌 Pluggable Extension SDK (`proxify.sdk`)
 
-### 📘 1. Facebook Platform (`backend/extensions/facebook/`)
-- **Decoupled Feed & Comment Engine (50x Faster)**: Super-fast chronological feed scraping (~1.5s/page) decoupled from deep comment extraction.
-- **Dual-Engine Post Refresh & Zero-Checkpoint Architecture**:
-  - **Zero-Cookie Anonymous Engine**: Instantly refreshes reactions, comment counts, and post availability using browser-fingerprinted HTTP/2 sessions without sending account cookies, eliminating checkpoint risks.
-  - **Extension Bridge GraphQL Fallback**: Seamless fallback for private groups executing strictly scoped `/api/graphql/` queries inside the user's authentic tab.
-- **Multi-Tenant Chrome Extension Isolation**: Client ID-based job queues, heartbeats, and token caching allowing multiple concurrent browser sessions without state collision.
-- **Automatic Unfiltered Comments**: Automatically enforces `CHRONOLOGICAL_UNFILTERED_INTENT_V1` to capture 100% of all comments without manual UI toggles.
-- **Bi-Directional Relay Pagination**: Comprehensive handling of both `before` and `after` cursors up to 500 pages (~5,000 comments/post).
-- **Interactive Floating Action Bar**: Bulk refresh, status verification, background comment crawling with live progress polling, and CSV export.
-- **Facebook Dashboard Console**: Group selector, author filters, full-text search, and multi-level comment hierarchy viewer.
+Proxify follows **Clean Architecture** and the **Open/Closed Principle**. The Core engine remains 100% platform-agnostic while exposing a rich `ExtensionContext` for custom plugins and private extensions:
 
-### 💬 2. Zalo Platform (`backend/extensions/zalo/`)
-- **Protocol & Crypto Decryption**: Uses an embedded JavaScript runtime (`crypto_subtle.js`) to decrypt end-to-end encrypted packets and WebSocket messages from Zalo Web.
-- **Message & Contact Extractor**: Automatically parses chat messages, group memberships, and contact books into structured PostgreSQL tables.
-- **Dedicated Zalo Web UI**: Independent interface for inspecting decrypted Zalo messages and contacts in real-time.
-
-### 🎥 3. YouTube Platform & Enhancer (`backend/extensions/youtube/`)
-- **Graceful Ad-Stripping Engine**: Intelligently prunes top-level ad containers (`clean_youtube_json_data`) in Innertube JSON APIs and watch HTML without corrupting the player's internal state machine or breaking pause/play controls.
-- **Inline Anti-AFK Watchdog**: Injects a lightweight in-page watchdog script and resets inactivity thresholds (`lactThresholdMs`) to 1,000 days, permanently bypassing "Video paused. Continue watching?" interruptions.
-- **Zero-Buffering Stream Passthrough**: Routes high-throughput video chunks (`googlevideo.com`) via raw TCP Passthrough without TLS decryption overhead or Python memory buffering.
-
-### 🔌 4. Zero-Overhead Passthrough & Stealth Suite (`backend/proxify/utils/stealth.py`)
-- **Inverted Scope Protection (`allow_hosts`)**: Only intercepts target platform APIs; 100% of non-target internet traffic (Google Workspace, GitHub, games, OS telemetry) passes through at raw wire speed.
-- **TLS ClientHello Impersonation**: Disguises proxy connections from JA3 fingerprint monitors using standard browser cipher suites.
+- **Prefix-Trie Domain Router (`ProxyRouter`)**: $O(k)$ domain matching for registering request/response `Observer`s (non-blocking) and `Mutator`s (in-flight modification).
+- **Custom Record Filters**: Register custom predicates via `context.register_record_filter(fn)` to exclude noisy telemetry or streaming endpoints from database logging.
+- **CQRS Event Bus & Worker**: Publish domain events from proxy interceptors and handle them asynchronously via `context.register_topic_handler(topic, handler)`.
+- **Dynamic UI & API Registration**: Extensions can mount custom `aiohttp` routes (`context.register_routes`) and inject navigation tabs into the React Dashboard (`context.register_ui_page`).
 
 ---
 
@@ -129,7 +112,8 @@ Access your environment:
 
 ```bash
 # 1. Install Python requirements
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
+pip install -e ./backend
 
 # 2. Configure environment
 cp .env.example .env
@@ -149,41 +133,39 @@ npm run dev
 
 ```mermaid
 graph TD
-    Client["📱 Client Traffic (Browser / Mobile / App)"] -->|Proxy :8080| Core["🛡️ Proxify Core (Mitmproxy Engine)"]
-    Core --> Plugins["🔌 Plugins & Platforms (Facebook, Zalo, YouTube,...)"]
-    Plugins --> DB[("💾 PostgreSQL Database")]
-    
-    UI["💻 React Web Dashboard (:8888)"] <-->|Control & Monitor| Core
-    Extension["🧩 Chrome Extension Bridge"] <-->|Anti-Bot Tab Execution| Plugins
+    Client["🌐 Browser / App Traffic"] -->|HTTP/HTTPS :8080| Router["🛡️ ProxyRouter (Trie Domain Matcher)"]
+    Ext["🧩 Chrome Extension"] <-->|Toggle Proxy & DB Filter| API["⚙️ Dashboard REST & WS API (:8888)"]
+    Router -->|Non-Blocking Copy| Storage["📦 TrafficStorageWorker (Async Batch Queue)"]
+    Router <-->|Optional Spoofing| TLS["🎭 TLSSpooferPlugin (curl_cffi Chrome JA3)"]
+    Router <-->|SDK Hooks| SDK["🔌 Extension SDK (Observers / Mutators)"]
+    Storage --> DB[("💾 PostgreSQL (requests table + TTL Worker)")]
+    UI["💻 React Traffic Inspector (:8888)"] <-->|Live WebSocket & REST| API
+    API <--> DB
 ```
 
 ---
 
 ## 📂 Directory Structure
- 
+
 ```text
 Proxify/
 ├── backend/
-│   ├── chrome_extension/        # Browser Extension Bridge (Service Worker & Content Script)
-│   ├── extensions/              # Modular Platform Extensions
-│   │   ├── facebook/            # Facebook (Crawler, Bridge, Auth, Extractor, Multi-Tenant)
-│   │   ├── youtube/             # YouTube (Ad-Stripper, Anti-AFK, Stream Passthrough)
-│   │   └── zalo/                # Zalo (Crypto Decryption, Models, Extractor, DB)
-│   ├── proxify/                 # Core framework & orchestration
-│   │   ├── core/                # System orchestration & event bus
-│   │   ├── database/            # PostgreSQL connection pool & migrations
-│   │   ├── plugins/             # Plugin registry & base classes
-│   │   ├── sdk/                 # Public SDK & lifecycle interfaces
-│   │   ├── utils/               # Shared utilities (stealth, circuit breaker, graphql)
-│   │   ├── server.py            # Mitmproxy DumpMaster & traffic scope management
-│   │   └── dashboard.py         # Internal metrics dashboard API
-│   └── tests/                   # Pytest test suite (87 tests)
-├── frontend/                    # Modern React Web Dashboard (React + Vite + TypeScript)
-│   ├── src/                     # UI components, state hooks, traffic viewers
-│   └── nginx.conf               # Nginx production web server configuration
-├── scripts/                     # Operational & utility scripts (e.g. shortcut creators)
-├── docs/                        # Architecture documentation & AI Developer Changelog
-└── docker-compose.yml           # Multi-container orchestration (App, UI, Database)
+│   ├── chrome_extension/        # 1-Click Proxy Toggle & DB Capture Filter Extension (Manifest V3)
+│   ├── proxify/                 # Core Request Tracking Framework
+│   │   ├── core/                # ProxyRouter, EventBus, TrafficStorageWorker, DatabaseManager
+│   │   ├── database/            # PostgreSQL connection pool, schema, and TTL retention worker
+│   │   ├── plugins/             # BasePlugin, PluginRegistry, and TLSSpooferPlugin
+│   │   ├── sdk/                 # Public Extension SDK (BaseExtension, ExtensionContext, Loader)
+│   │   ├── utils/               # Core utilities (TLS stealth engine, GraphQL parser, content helpers)
+│   │   ├── server.py            # Mitmproxy DumpMaster & V1GlobalObserver
+│   │   └── dashboard.py         # REST API & real-time WebSocket broadcaster
+│   └── tests/                   # Core unit & integration test suite (52 tests)
+├── frontend/                    # React + TypeScript + Vite Traffic Inspector UI
+│   ├── src/                     # Live traffic table, request/response detail modal, filter bar
+│   └── nginx.conf               # Nginx production reverse-proxy configuration
+├── scripts/                     # Operational utility scripts (Chrome proxy policy & stability checks)
+├── docs/                        # Architecture & module documentation
+└── docker-compose.yml           # Multi-container orchestration (proxify, ui, db)
 ```
 
 ---

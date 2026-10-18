@@ -4,7 +4,7 @@
     <br>
     Proxify
     <br>
-    <small>The Ultimate Multi-Platform Request Capture & Reverse-Engineering Framework</small>
+    <small>High-Performance HTTP/HTTPS/WebSocket Request Tracker & Traffic Inspection Framework</small>
 </h1>
 
 <p align="center">
@@ -29,7 +29,7 @@
     &middot;
     <a href="#core-features"><strong>Tính năng cốt lõi</strong></a>
     &middot;
-    <a href="#platforms"><strong>Nền tảng & Plugin</strong></a>
+    <a href="#extension-sdk"><strong>Extension SDK</strong></a>
     &middot;
     <a href="#quick-start"><strong>Bắt đầu nhanh</strong></a>
     &middot;
@@ -42,61 +42,44 @@
 
 ## 🌟 Tổng Quan (Overview)
 
-**Proxify** là một nền tảng framework toàn diện chuyên dùng để **đánh chặn (interception), phân tích giải mã (reverse-engineering), và tự động trích xuất dữ liệu (data extraction)** từ các luồng traffic HTTP/HTTPS/HTTP2/WebSocket.
+**Proxify** là một nền tảng framework gọn nhẹ, hiệu năng cao chuyên dùng để **theo dõi (request tracking), đánh chặn và phân tích lưu lượng mạng (traffic inspection)** trên các giao thức HTTP, HTTPS, HTTP/2 và WebSocket.
 
-Được xây dựng trên nền tảng **Mitmproxy 10**, Proxify kết hợp giữa:
-1. **Lõi Proxy Đa Luồng (Mitmproxy Core)**: Đánh chặn tàng hình, giải mã TLS, tự động lưu trữ luồng dữ liệu thô vào PostgreSQL.
-2. **Cơ Chế Bỏ Qua Anti-Bot (Stealth & TLS Spoofing)**: Nhận diện và vượt qua các cơ chế WAF/Anti-Bot khắt khe (Cloudflare, Facebook Checkpoint, Akamai) thông qua giả lập TLS/JA3 Fingerprint và Chrome Extension First-Party Tab Bridge.
-3. **Hệ Thống Plugin & Nền Tảng Đa Dạng**: Tích hợp sẵn bộ trích xuất dữ liệu chuyên sâu cho **Facebook**, **Zalo**, **YouTube**, cùng kiến trúc plugin mở dễ dàng mở rộng cho TikTok, Shopee, Telegram,...
-4. **Dashboard Quản Trị Trực Quan**: Theo dõi traffic thời gian thực (Live Traffic Inspector tương tự Fiddler/Charles), quản lý phiên, cấu hình proxy và điều khiển cào dữ liệu qua giao diện Web React hiện đại.
+Được xây dựng trên nền tảng **Mitmproxy 10**, **AsyncIO** và **PostgreSQL**, Proxify tập trung vào sự tinh gọn, chuẩn mực theo Clean Architecture:
+1. **Lõi Tracking Bất Đồng Bộ (Async Request Tracker Core)**: Giải mã HTTPS/TLS không chặn luồng, tự động bóc tách truy vấn GraphQL và ghi nhận dữ liệu thô theo lô (batch) vào PostgreSQL.
+2. **Giả Lập Vân Tay TLS/JA3 (TLS Fingerprint Spoofing)**: Tích hợp `curl_cffi` để giả lập chữ ký TLS ClientHello của trình duyệt thật (`chrome131`), giúp các trang web có hệ thống bảo vệ chống bot khắt khe (Cloudflare, Akamai) vẫn tải mượt mà khi đi qua proxy để phục vụ việc theo dõi request.
+3. **Tiện Ích Điều Khiển 1-Click Trên Chrome**: Chrome Extension chuẩn Manifest V3 tối giản, chỉ dùng để bật/tắt định tuyến traffic về Proxify (`127.0.0.1:8080`) và cấu hình bộ lọc domain lưu vào Database.
+4. **Giao Diện Giám Sát Thời Gian Thực (Live Traffic Dashboard)**: Ứng dụng Web React + TypeScript hiện đại cho phép quan sát trực tiếp từng Request/Response (Headers, Payload, Status, Latency, GraphQL Operation), lọc theo domain và tự động dọn dẹp dữ liệu cũ theo chu kỳ (TTL Retention).
 
 ---
 
 ## 🛡️ Tính Năng Cốt Lõi (Core Features)
 
-### 1. Đánh Chặn & Giải Mã Traffic Tàng Hình (Stealth MITM)
-- **Giải mã HTTPS/TLS**: Tự động cài đặt CA Certificate để bóc tách toàn bộ gói tin mã hóa SSL/TLS trên trình duyệt, ứng dụng di động (Android/iOS) và giả lập.
-- **Hỗ trợ HTTP/2 & WebSocket**: Bắt trọn vẹn các luồng dữ liệu thời gian thực (như Zalo Chat WebSocket, Facebook Lightspeed/StreamController).
-- **Lưu trữ Traffic Bất đồng bộ (Async Traffic Storage)**: Toàn bộ Request và Response thô được đẩy vào hàng đợi và xử lý bởi `TrafficStorageWorker` lưu vào PostgreSQL mà không gây bất kỳ độ trễ nào cho kết nối mạng của người dùng.
-- **Bộ Lọc Log Thông Minh (Clean Logging)**: Tích hợp `PollingEndpointFilter` loại bỏ 100% rác log polling nội bộ `200 OK`, chỉ hiển thị các sự kiện nghiệp vụ và cảnh báo thực sự quan trọng.
+### 1. Theo Dõi & Lưu Trữ Request Hiệu Năng Cao
+- **Giải mã HTTPS/TLS toàn diện**: Tự động khởi tạo và quản lý chứng chỉ Root CA để phân tích lưu lượng mã hóa từ trình duyệt máy tính, công cụ CLI hoặc thiết bị di động.
+- **Hỗ trợ HTTP/2 & WebSocket**: Bắt trọn vẹn các luồng ghép kênh HTTP/2 và gói tin hai chiều WebSocket mà không làm đứt kết nối.
+- **Ghi nhận Database theo lô bất đồng bộ (`TrafficStorageWorker`)**: Đẩy toàn bộ Request/Response vào hàng đợi bộ nhớ và commit theo batch (`COMMIT_BATCH_SIZE` / `COMMIT_INTERVAL`) xuống PostgreSQL, đảm bảo độ trễ bằng 0 đối với trải nghiệm duyệt web.
+- **Nhận diện tự động GraphQL (`utils/graphql.py`)**: Tự động phân tích payload GraphQL để trích xuất `operationName`, hỗ trợ lọc nhanh các truy vấn API phức tạp trên Dashboard.
+- **Truyền tải thông minh (Smart Asset & Media Streaming)**: Tự động stream trực tiếp các luồng video/audio, file `.css` và các gói `.js` không cần can thiệp qua thẳng trình duyệt mà không đệm vào RAM.
 
-### 2. Bộ Công Cụ Vượt Rào Cản Anti-Bot (Stealth Engine)
-- **Phát hiện Soft-Block tự động (`stealth.py`)**: Tự động nhận diện các trang thử thách Cloudflare Turnstile, CAPTCHA, Facebook Checkpoint redirect và mã lỗi 429/503 để kích hoạt Exponential Backoff.
-- **Chrome Extension First-Party Tab Bridge**: Thực thi request ngầm ngay trong tab trình duyệt thật của người dùng, kế thừa trọn vẹn phiên đăng nhập, Cookie và IP nội địa, **triệt tiêu hoàn toàn lỗi Checkpoint/Logout 1357001**.
-- **Circuit Breaker Pattern**: Bảo vệ hệ thống khỏi việc gửi dồn dập request khi máy chủ đích đang bị nghẽn hoặc tạm khóa.
+### 2. Giả Lập TLS/JA3 & Tương Thích WAF
+- **Giả lập TLS Trình duyệt (`plugins/tls_spoofer.py`)**: Các kết nối TLS mặc định của Python/Mitmproxy thường bị chặn bởi hệ thống kiểm tra JA3/JA4 của Cloudflare hoặc Akamai. `TLSSpooferPlugin` sử dụng `curl_cffi` (`impersonate="chrome131"`) cho các tên miền nằm trong `SPOOF_DOMAINS`, giúp trang đích hoạt động bình thường trong suốt quá trình bắt gói tin.
+- **Phát hiện Soft-Block & Tự động thử lại (`utils/stealth.py`)**: Nhận diện các trang thử thách Cloudflare, lỗi giới hạn tốc độ (`429`/`503`) và tự động thực hiện Exponential Backoff.
 
-### 3. Kiến Trúc Plugin Cắm Nóng (Dynamic Plugin System)
-- Thiết kế theo nguyên tắc **Open/Closed**: Mọi nền tảng mới chỉ cần kế thừa `BasePlugin` và đăng ký qua `@register_plugin("name")`.
-- Tự động hook vào các vòng đời gói tin: `on_request()`, `on_response()`, `on_websocket_message()`, `on_error()`.
+### 3. Tiện Ích Mở Rộng Chrome (`backend/chrome_extension/`)
+- **Bật/Tắt Proxy 1-Click**: Định tuyến hoặc ngắt định tuyến toàn bộ lưu lượng Chrome qua Proxify (`127.0.0.1:8080`) chỉ với một cú nhấp chuột cùng biểu tượng trạng thái trực quan (`ON`/`OFF`).
+- **Điều khiển Lưu trữ Database**: Bật/tắt ghi nhận request vào PostgreSQL tức thì và cấu hình danh sách domain cho phép (`db_allowed_domains`) ngay trên Popup.
+- **Quyền hạn tối thiểu (Least Privilege)**: Chỉ yêu cầu quyền `proxy` và `storage` — hoàn toàn không đọc cookie hay chèn script vào trang web của người dùng.
 
 ---
 
-## 🌐 Các Nền Tảng Hỗ Trợ Sẵn (Supported Platforms & Plugins)
+## 🔌 Kiến Trúc Mở Rộng Qua SDK (`proxify.sdk`)
 
-### 📘 1. Nền Tảng Facebook (`backend/extensions/facebook/`)
-- **Tách Rời Feed & Comment ($50\times$ Speedup)**: Cào danh sách bài viết nhóm theo thứ tự thời gian (`CHRONOLOGICAL`) siêu tốc (~1.5s/trang), tách biệt hoàn toàn với tiến trình cào bình luận.
-- **Cơ Chế Làm Mới Bài Viết Kép & Phòng Thủ Checkpoint (Dual-Engine Post Refresh & Zero-Checkpoint)**:
-  - **Engine Ẩn Danh Không Dùng Cookie (Zero-Cookie Anonymous Engine)**: Tự động cập nhật số lượng cảm xúc, lượt bình luận và trạng thái bài viết công khai siêu tốc qua HTTP/2 fingerprinted browser mà không cần truyền cookie tài khoản, triệt tiêu 100% nguy cơ checkpoint.
-  - **Extension Bridge GraphQL Fallback**: Tự động chuyển tiếp sang Chrome Extension để truy vấn GraphQL an toàn trong ngữ cảnh tab thật đối với các nhóm kín hoặc bài viết riêng tư.
-- **Đa Phiên Chrome Extension Cách Ly Tuyệt Đối (Multi-Tenant Isolation)**: Phân phối tác vụ theo `client_id`, cơ chế heartbeat và quản lý token độc lập, cho phép nhiều profile trình duyệt kết nối cùng lúc mà không xung đột trạng thái.
-- **Tự Động Thu Thập "Tất Cả Bình Luận"**: Cưỡng chế `CHRONOLOGICAL_UNFILTERED_INTENT_V1` để lấy sạch 100% bình luận (kể cả bình luận bị Facebook xếp vào spam hoặc ẩn).
-- **Phân Trang 2 Chiều (Bi-Directional Relay Pagination)**: Hỗ trợ đồng thời cả `before` và `after` cursor, nâng giới hạn lên đến 500 trang (~5,000 bình luận/bài viết).
-- **Thanh Tác Vụ Nổi Tương Tác (Interactive Floating Action Bar)**: Hỗ trợ làm mới hàng loạt, đồng bộ trạng thái, cào bình luận ngầm theo dõi thời gian thực và xuất dữ liệu ra CSV.
-- **Giao Diện Facebook Dashboard Nâng Cao**: Bộ chọn nhóm, lọc theo tác giả, ngày tháng, tìm kiếm full-text và modal xem cây bình luận phân cấp chuyên sâu.
+Proxify tuân thủ nghiêm ngặt **Clean Architecture** và nguyên lý **Open/Closed (SOLID)**. Lõi hệ thống hoàn toàn độc lập với các nền tảng bên ngoài nhưng cung cấp sẵn `ExtensionContext` mạnh mẽ để người dùng tự viết thêm các extension riêng (đặt tại `private/extensions/` hoặc cấu hình qua `PROXIFY_EXTENSIONS_DIR`):
 
-### 💬 2. Nền Tảng Zalo (`backend/extensions/zalo/`)
-- **Giải Mã Giao Thức Zalo**: Sử dụng engine JavaScript nhúng (`crypto_subtle.js`) để giải mã các gói tin mã hóa đầu cuối (E2EE) và dữ liệu WebSocket của Zalo Web.
-- **Bóc Tách Tin Nhắn & Hội Thoại**: Tự động trích xuất cấu trúc tin nhắn, hội thoại cá nhân, danh bạ bạn bè và thông tin thành viên nhóm Zalo vào cơ sở dữ liệu PostgreSQL.
-- **Giao Diện Zalo Riêng Biệt**: Giao diện độc lập phục vụ việc theo dõi tin nhắn và danh bạ trực tiếp.
-
-### 🎥 3. Nền Tảng & Tiện Ích YouTube (`backend/extensions/youtube/`)
-- **Lọc Sạch Quảng Cáo An Toàn (Graceful Ad-Stripping)**: Bóc tách chính xác các container quảng cáo cấp cao (`clean_youtube_json_data`) trong Innertube JSON và mã HTML trang xem mà không làm hỏng máy trạng thái (state machine) hoặc các nút bấm Pause/Play của player.
-- **Chống Dừng Hình Tự Động (Anti-AFK Watchdog)**: Tự động nhúng script giám sát và điều chỉnh ngưỡng bất hoạt (`lactThresholdMs`) lên 1.000 ngày, triệt tiêu vĩnh viễn hộp thoại gây gián đoạn "Video đã tạm dừng. Tiếp tục xem?".
-- **Truyền Tải Luồng Trực Tiếp Không Độ Trễ**: Luồng dữ liệu video streaming dung lượng lớn (`googlevideo.com`) đi qua raw TCP Passthrough ở tốc độ gốc, không qua giải mã TLS hay đệm bộ nhớ Python.
-
-### 🔌 4. Bộ Cách Ly Không Tốn Tài Nguyên & Stealth Suite (`backend/proxify/utils/stealth.py`)
-- **Phạm Vi Đánh Chặn Nghịch Đảo (`allow_hosts`)**: Chỉ can thiệp vào các API nền tảng mục tiêu; 100% lưu lượng Internet khác (Google Workspace, GitHub, game online, telemetry hệ thống) được passthrough ở tốc độ dây mạng gốc.
-- **Giả Lập TLS ClientHello**: Đổi lốt vân tay TLS ClientHello và bộ mã hóa Cipher Suites chuẩn của Google Chrome, che giấu dấu vết proxy đối với các hệ thống WAF giám sát JA3.
+- **Định tuyến Domain theo cây tiền tố (`ProxyRouter`)**: Tra cứu tên miền với độ phức tạp $O(k)$ cho cả `Observer` (quan sát bất đồng bộ) và `Mutator` (can thiệp gói tin trực tiếp).
+- **Bộ lọc Bản ghi Tùy chỉnh (`register_record_filter`)**: Cho phép extension đăng ký hàm kiểm tra để bỏ qua không lưu các request rác/telemetry vào Database.
+- **CQRS Event Bus & Background Worker**: Phát sự kiện từ luồng proxy và đăng ký hàm xử lý bất đồng bộ qua `context.register_topic_handler(topic, handler)`.
+- **Mở rộng API & Giao diện Động**: Tự động gắn thêm route `aiohttp` (`context.register_routes`) và thêm trang điều hướng trên thanh menu React Dashboard (`context.register_ui_page`).
 
 ---
 
@@ -104,7 +87,7 @@
 
 ### Cách 1: Chạy Bằng Docker Compose (Khuyên Dùng)
 
-Khởi chạy trọn bộ 3 dịch vụ chỉ với một câu lệnh:
+Khởi chạy trọn bộ 3 dịch vụ (Proxy Backend + PostgreSQL + React UI) chỉ với một câu lệnh:
 
 ```bash
 # 1. Clone mã nguồn
@@ -121,7 +104,7 @@ Các dịch vụ sẽ sẵn sàng tại:
 - **PostgreSQL Database:** Cổng `5432`
 
 > 💡 **Cài đặt chứng chỉ SSL/TLS (Chỉ làm 1 lần duy nhất):**  
-> Cấu hình máy của bạn trỏ Proxy về `127.0.0.1:8080`, sau đó truy cập `http://mitm.it` trên trình duyệt để tải và cài đặt chứng chỉ Root CA vào máy.
+> Bật Proxy về `127.0.0.1:8080`, sau đó truy cập `http://mitm.it` trên trình duyệt để tải và cài đặt chứng chỉ Mitmproxy Root CA vào máy.
 
 ---
 
@@ -129,7 +112,8 @@ Các dịch vụ sẽ sẵn sàng tại:
 
 ```bash
 # 1. Cài đặt thư viện Python
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
+pip install -e ./backend
 
 # 2. Cấu hình biến môi trường
 cp .env.example .env
@@ -137,7 +121,7 @@ cp .env.example .env
 # 3. Khởi chạy Backend Proxy
 python -m proxify
 
-# 4. Khởi chạy Frontend UI (Thư mục frontend/)
+# 4. Khởi chạy Frontend UI (tại terminal khác)
 cd frontend
 npm install
 npm run dev
@@ -149,12 +133,14 @@ npm run dev
 
 ```mermaid
 graph TD
-    Client["📱 Client (Trình duyệt / Ứng dụng di động)"] -->|Proxy :8080| Core["🛡️ Lõi Proxify (Mitmproxy Engine)"]
-    Core --> Plugins["🔌 Plugins & Platforms (Facebook, Zalo, YouTube,...)"]
-    Plugins --> DB[("💾 Cơ Sở Dữ Liệu (PostgreSQL)")]
-    
-    UI["💻 React Web Dashboard (:8888)"] <-->|Giám sát & Điều khiển| Core
-    Extension["🧩 Chrome Extension Bridge"] <-->|Vượt Checkpoint / Anti-Bot| Plugins
+    Client["🌐 Lưu lượng Trình duyệt / Ứng dụng"] -->|HTTP/HTTPS :8080| Router["🛡️ ProxyRouter (Trie Domain Matcher)"]
+    Ext["🧩 Chrome Extension"] <-->|Bật/Tắt Proxy & Lọc Domain| API["⚙️ Dashboard REST & WS API (:8888)"]
+    Router -->|Sao chép bất đồng bộ| Storage["📦 TrafficStorageWorker (Hàng đợi Batch)"]
+    Router <-->|Giả lập TLS tùy chọn| TLS["🎭 TLSSpooferPlugin (curl_cffi Chrome JA3)"]
+    Router <-->|SDK Hooks| SDK["🔌 Extension SDK (Observers / Mutators)"]
+    Storage --> DB[("💾 PostgreSQL (Bảng requests + TTL Worker)")]
+    UI["💻 React Traffic Inspector (:8888)"] <-->|WebSocket & REST| API
+    API <--> DB
 ```
 
 ---
@@ -164,26 +150,22 @@ graph TD
 ```text
 Proxify/
 ├── backend/
-│   ├── chrome_extension/        # Chrome Extension Bridge (Background Service Worker & Content Script)
-│   ├── extensions/              # Các Extension Nền Tảng Module Hóa
-│   │   ├── facebook/            # Facebook Engine (Crawler, Bridge, Auth, Extractor, Multi-Tenant)
-│   │   ├── youtube/             # YouTube Engine (Ad-Stripper, Anti-AFK, Stream Passthrough)
-│   │   └── zalo/                # Zalo Engine (Crypto Decryption, Models, Extractor, Database)
-│   ├── proxify/                 # Lõi Framework & Điều Phối
-│   │   ├── core/                # Lõi điều phối hệ thống & Event Bus
-│   │   ├── database/            # Quản lý Connection Pool PostgreSQL & Migrations
-│   │   ├── plugins/             # Plugin Registry & Base Classes
-│   │   ├── sdk/                 # Public SDK & Interface vòng đời
-│   │   ├── utils/               # Công cụ bổ trợ (Stealth, Circuit Breaker, GraphQL AST)
-│   │   ├── server.py            # Mitmproxy DumpMaster & quản lý phạm vi traffic
-│   │   └── dashboard.py         # API phục vụ Dashboard nội bộ
-│   └── tests/                   # Toàn bộ 87 bài kiểm thử tự động pytest
-├── frontend/                    # Giao diện Web hiện đại (React + TypeScript + Vite)
-│   ├── src/                     # Mã nguồn UI (Facebook Console, Traffic Viewer, Hooks)
-│   └── nginx.conf               # Nginx server cấu hình cho Docker
-├── scripts/                     # Script tiện ích & vận hành (tạo shortcut Chrome cách ly,...)
-├── docs/                        # Toàn bộ tài liệu kiến trúc & AI Developer Logs
-└── docker-compose.yml           # Khởi chạy đa dịch vụ (App, UI, Database)
+│   ├── chrome_extension/        # Tiện ích Chrome bật/tắt Proxy & cấu hình lọc DB (Manifest V3)
+│   ├── proxify/                 # Lõi Framework Theo Dõi Request
+│   │   ├── core/                # ProxyRouter, EventBus, TrafficStorageWorker, DatabaseManager
+│   │   ├── database/            # Quản lý Connection Pool PostgreSQL, Schema & TTL Worker
+│   │   ├── plugins/             # BasePlugin, PluginRegistry và TLSSpooferPlugin
+│   │   ├── sdk/                 # Public Extension SDK (BaseExtension, ExtensionContext, Loader)
+│   │   ├── utils/               # Công cụ lõi (TLS Stealth Engine, GraphQL Parser, Content Helpers)
+│   │   ├── server.py            # Mitmproxy DumpMaster & V1GlobalObserver
+│   │   └── dashboard.py         # REST API & WebSocket truyền tải lưu lượng thời gian thực
+│   └── tests/                   # Bộ kiểm thử tự động pytest cho Core (52 tests)
+├── frontend/                    # Giao diện Web giám sát lưu lượng (React + TypeScript + Vite)
+│   ├── src/                     # Bảng Live Traffic, Modal chi tiết Request/Response, Thanh bộ lọc
+│   └── nginx.conf               # Cấu hình Nginx reverse-proxy cho Docker
+├── scripts/                     # Script tiện ích vận hành & kiểm tra độ ổn định hệ thống
+├── docs/                        # Tài liệu kiến trúc & lịch sử thay đổi kỹ thuật
+└── docker-compose.yml           # Khởi chạy đa dịch vụ (proxify, ui, db)
 ```
 
 ---

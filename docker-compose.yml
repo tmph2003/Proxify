@@ -13,23 +13,12 @@ services:
       - COMMIT_BATCH_SIZE=50
       - COMMIT_INTERVAL=2.0
       - DUMP_DIR=dumps
-      - SPOOF_DOMAINS=${SPOOF_DOMAINS:-tiktok.com,tiktokv.com,byteoversea.com,tiktokcdn.com,zalo.me,chat.zalo.me,zalo.vn,zalopay.vn,zaloapp.com}
-      - IGNORE_HOSTS=captive.apple.com,bag.itunes.apple.com,p163-quota.icloud.com,mcs-sg.tiktokv.com,mon-sg.tiktokv.com,im-ws-sg.tiktok.com,zadn.vn,zing.vn,mcp.docker.com,api.docker.com,desktop.docker.com,mail.google.com,chat.google.com,accounts.google.com,clients6.google.com,client-channel.google.com,contacts.google.com,meet.google.com,drive.google.com,docs.google.com,github.com,githubassets.com,githubusercontent.com,microsoft.com,windowsupdate.com,live.com,office.com,msftncsi.com,googlevideo.com,c.youtube.com,signaler-pa.youtube.com,google.com,googleapis.com,nel.goog,withgoogle.com,adtrafficquality.google,gvt2.com,1e100.net,gstatic.com,ytimg.com,ggpht.com,sunhouse.com.vn,172.16.*,accounts.youtube.com,gvt1.com,gvt3.com,fastly-edge.com,play.google.com,googleusercontent.com,google.com.vn,chatgpt.com,openai.com,apple.com,vscode-cdn.net,exp-tas.com,gravatar.com,garena.com,garena.vn,garenanow.com,gopapi.io,ea.com,origin.com,nexon.com,nexon.net,riotgames.com,leagueoflegends.com,steampowered.com,steamcommunity.com,epicgames.com,battlenet.com,blizzard.com
+      - SPOOF_DOMAINS=${SPOOF_DOMAINS:-}
+      - IGNORE_HOSTS=${IGNORE_HOSTS:-googlevideo.com,c.youtube.com,accounts.youtube.com,signaler-pa.youtube.com,accounts.google.com,clients6.google.com,client-channel.google.com,gvt1.com,gvt2.com,gvt3.com,1e100.net,nel.goog,msftncsi.com,windowsupdate.com}
       - DB_DSN=postgresql://proxify_user:proxify_pass@db:5432/proxify_db
-      - DB_INTEGRATION_ENABLED=true
+      - DB_INTEGRATION_ENABLED=${DB_INTEGRATION_ENABLED:-false}
       - RECORD_RETENTION_DAYS=${RECORD_RETENTION_DAYS:-7}
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    extra_hosts:
-      - "ks.sunhouse.com.vn:172.16.100.130"
-      - "erp.sunhouse.com.vn:172.16.100.130"
-      - "git.sunhouse.com.vn:172.16.100.130"
-      - "trino.sunhouse.com.vn:172.16.100.130"
-      - "bi.sunhouse.com.vn:172.16.100.183"
-      - "jira.sunhouse.com.vn:172.16.100.130"
-      - "sso.sunhouse.com.vn:172.16.100.130"
-      - "minio.sunhouse.com.vn:172.16.100.129"
+      - PROXIFY_EXTENSIONS_DIR=/app/extensions
     command: ["python", "-m", "proxify"]
     depends_on:
       db:
@@ -44,7 +33,7 @@ services:
     volumes:
       - ~/.mitmproxy:/root/.mitmproxy
       - ./backend:/app
-      - ./backend/CloakBrowser:/app/CloakBrowser
+      - ./private/extensions:/app/extensions
 
   ui:
     build: ./frontend
@@ -85,3 +74,12 @@ services:
 
 volumes:
   proxify_pgdata:
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      # Đồng bộ MTU 1420 với card Wi-Fi host (tránh hiện tượng Docker mặc định MTU 1500 đàm phán
+      # TCP MSS=1448 gây rớt gói DF / TCP retransmission trên đường truyền PPPoE / Router phụ ở nhà)
+      com.docker.network.driver.mtu: "1420"
+

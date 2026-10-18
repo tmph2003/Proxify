@@ -44,14 +44,12 @@ zalo_browser_data/
 # Git Worktrees
 .worktrees/
 
-# Private Extensions & Tools (Excluded from public open-core repo)
+# Private Extensions, Crawlers & Tools (Excluded from public open-core repo)
+private/
 backend/extensions/
 backend/CloakBrowser/
-old_crawler.py
-old_stealth.py
 frontend/src/pages/Facebook.tsx
 frontend/src/pages/Zalo.tsx
 frontend/src/hooks/useFacebook.ts
 frontend/src/hooks/useZalo.ts
-
 
