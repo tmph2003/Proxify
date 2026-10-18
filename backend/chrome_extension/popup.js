@@ -1,374 +1,291 @@
-document.getElementById('getCookieBtn').addEventListener('click', async () => {
-    const status = document.getElementById('status');
-    const btn = document.getElementById('getCookieBtn');
-
-    btn.disabled = true;
-    btn.style.opacity = '0.5';
-    status.innerText = "Đang kiểm tra tab Facebook...";
-    status.style.color = "white";
-
-    try {
-        // 1. Tìm Tab Facebook đang mở
-        let targetTabId = null;
-        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (activeTab && activeTab.url && activeTab.url.includes("facebook.com")) {
-            targetTabId = activeTab.id;
-        } else {
-            const allTabs = await chrome.tabs.query({});
-            const fbTab = allTabs.find(t => t.url && t.url.includes("facebook.com"));
-            if (fbTab) {
-                targetTabId = fbTab.id;
-            }
-        }
-
-        if (!targetTabId) {
-            status.innerHTML = "❌ <b>Không tìm thấy tab Facebook nào!</b><br><small style='color:#fca5a5'>Vui lòng mở 1 tab Facebook (facebook.com) và đăng nhập trước khi bấm nút này.</small>";
-            status.style.color = "#ef4444";
-            btn.disabled = false;
-            btn.style.opacity = '1';
-            return;
-        }
-
-        status.innerText = "Đang trích xuất Token từ tab Facebook...";
-
-        // 2. Inject script vào tab Facebook để trích xuất fb_dtsg, User ID và SiteData
-        let fb_dtsg = "";
-        let lsd = "";
-        let sd = null;
-        let userId = "";
-
-        try {
-            const results = await chrome.scripting.executeScript({
-                target: { tabId: targetTabId },
-                world: "MAIN",
-                func: () => {
-                    let res = { dtsg: "", lsd: "", user: "", sd: null, docCookie: "" };
-
-                    // 1. Extract User ID
-                    try {
-                        if (typeof require === "function") {
-                            try { res.user = String(require("CurrentUserInitialData").USER_ID || require("CurrentUserInitialData").ACCOUNT_ID || ""); } catch (e) { }
-                            if (!res.user || res.user === "0") {
-                                try { res.user = String(require("Env").USER_ID || require("Env").user || ""); } catch (e) { }
-                            }
-                        }
-                    } catch (e) { }
-
-                    if (!res.user || res.user === "0") {
-                        try {
-                            const m = document.documentElement.innerHTML.match(/["'](?:USER_ID|actorID|current_user_id)["']\s*:\s*["'](\d+)["']/);
-                            if (m) res.user = m[1];
-                        } catch (e) { }
-                    }
-
-                    // 2. Extract fb_dtsg
-                    try {
-                        if (typeof require === "function") {
-                            try { const d = require("DTSGInitialData"); if (d && d.token) res.dtsg = d.token; } catch (e) { }
-                            if (!res.dtsg) { try { const d = require("DTSGInitData"); if (d && d.token) res.dtsg = d.token; } catch (e) { } }
-                            if (!res.dtsg) { try { const d = require("DTSG"); if (d && d.token) res.dtsg = d.token; } catch (e) { } }
-                        }
-                    } catch (e) { }
-
-                    if (!res.dtsg && window.__fb_dtsg) {
-                        res.dtsg = window.__fb_dtsg;
-                    }
-
-                    if (!res.dtsg) {
-                        try {
-                            const inputEl = document.querySelector('input[name="fb_dtsg"]');
-                            if (inputEl && inputEl.value) res.dtsg = inputEl.value;
-                        } catch (e) { }
-                    }
-
-                    if (!res.dtsg) {
-                        try {
-                            const m = document.documentElement.innerHTML.match(/["'](?:DTSGInitialData|DTSGInitData)["'],\[\],\{["']token["']:["']([^"']+)["']/);
-                            if (m) res.dtsg = m[1];
-                        } catch (e) { }
-                    }
-
-                    if (!res.dtsg) {
-                        try {
-                            const m = document.documentElement.innerHTML.match(/name="fb_dtsg"\s*value="([^"]+)"/);
-                            if (m) res.dtsg = m[1];
-                        } catch (e) { }
-                    }
-
-                    // 3. Extract LSD
-                    try {
-                        if (typeof require === "function") {
-                            try { const l = require("LSD"); if (l && l.token) res.lsd = l.token; } catch (e) { }
-                        }
-                    } catch (e) { }
-
-                    if (!res.lsd) {
-                        try {
-                            const inputLsd = document.querySelector('input[name="lsd"]');
-                            if (inputLsd && inputLsd.value) res.lsd = inputLsd.value;
-                        } catch (e) { }
-                    }
-
-                    // 4. SiteData
-                    try {
-                        if (typeof require === "function") {
-                            const sdObj = require("SiteData");
-                            if (sdObj) {
-                                res.sd = {
-                                    rev: String(sdObj.revision || ""),
-                                    hsi: String(sdObj.hsi || ""),
-                                    spin_r: String(sdObj.__spin_r || ""),
-                                    spin_b: String(sdObj.__spin_b || ""),
-                                    spin_t: String(sdObj.__spin_t || ""),
-                                    hs: String(sdObj.haste_session || ""),
-                                    dpr: String(sdObj.pr || "1"),
-                                    ccg: String(sdObj.connectionClass || "GOOD")
-                                };
-                            }
-                        }
-                    } catch (e) { }
-
-                    try { res.docCookie = document.cookie || ""; } catch (e) { }
-
-                    return res;
-                }
-            });
-
-            if (results && results[0] && results[0].result) {
-                let r = results[0].result;
-                fb_dtsg = r.dtsg || "";
-                lsd = r.lsd || "";
-                sd = r.sd || null;
-                userId = r.user || "";
-            }
-        } catch (e) {
-            console.error("Script error:", e);
-        }
-
-        // 3. Quét toàn bộ Cookie của Facebook từ Cookie API (hỗ trợ cả Partitioned Cookies / CHIPS)
-        status.innerText = "Đang quét Cookie...";
-        let cookieMap = new Map();
-
-        const addCookie = (c) => {
-            if (c && c.name && c.value) {
-                cookieMap.set(c.name, c.value);
-            }
-        };
-
-        const targetDomains = [
-            ".facebook.com",
-            "facebook.com",
-            "www.facebook.com",
-            "m.facebook.com",
-            "web.facebook.com"
-        ];
-
-        const baseUrls = [
-            "https://www.facebook.com",
-            "https://facebook.com",
-            "https://m.facebook.com",
-            "https://web.facebook.com"
-        ];
-
-        // 3.1. Quét theo domain chuẩn (unpartitioned)
-        for (const dom of targetDomains) {
-            try {
-                const list = await chrome.cookies.getAll({ domain: dom });
-                if (Array.isArray(list)) list.forEach(addCookie);
-            } catch (e) { }
-        }
-
-        // 3.2. Quét Partitioned Cookies (CHIPS) - Rất quan trọng trên Chrome 118+
-        for (const dom of targetDomains) {
-            try {
-                const list = await chrome.cookies.getAll({ domain: dom, partitionKey: {} });
-                if (Array.isArray(list)) list.forEach(addCookie);
-            } catch (e) { }
-        }
-
-        // 3.3. Quét theo partition topLevelSite cụ thể
-        for (const topSite of ["https://facebook.com", "https://www.facebook.com", "https://m.facebook.com"]) {
-            try {
-                const list = await chrome.cookies.getAll({ partitionKey: { topLevelSite: topSite } });
-                if (Array.isArray(list)) list.forEach(addCookie);
-            } catch (e) { }
-        }
-
-        // 3.4. Quét theo Tab URL nếu có
-        try {
-            const targetTab = await chrome.tabs.get(targetTabId);
-            if (targetTab && targetTab.url) {
-                try {
-                    const list = await chrome.cookies.getAll({ url: targetTab.url });
-                    if (Array.isArray(list)) list.forEach(addCookie);
-                } catch (e) { }
-                try {
-                    const list = await chrome.cookies.getAll({ url: targetTab.url, partitionKey: {} });
-                    if (Array.isArray(list)) list.forEach(addCookie);
-                } catch (e) { }
-            }
-        } catch (e) { }
-
-        // 3.5. Quét tất cả Cookie Stores
-        try {
-            const stores = await chrome.cookies.getAllCookieStores();
-            for (const store of stores) {
-                for (const url of baseUrls) {
-                    try {
-                        const list = await chrome.cookies.getAll({ url: url, storeId: store.id });
-                        if (Array.isArray(list)) list.forEach(addCookie);
-                    } catch (e) { }
-                    try {
-                        const list = await chrome.cookies.getAll({ url: url, storeId: store.id, partitionKey: {} });
-                        if (Array.isArray(list)) list.forEach(addCookie);
-                    } catch (e) { }
-                }
-            }
-        } catch (e) { }
-
-        // 3.6. Quét toàn bộ kho cookie và lọc tên miền Facebook (bắt trọn mọi ngóc ngách)
-        try {
-            const allUnpart = await chrome.cookies.getAll({});
-            if (Array.isArray(allUnpart)) {
-                allUnpart.forEach(c => {
-                    if (c && c.domain && (c.domain.includes("facebook.com") || c.domain.includes("fb.com"))) {
-                        addCookie(c);
-                    }
-                });
-            }
-        } catch (e) { }
-
-        try {
-            const allPart = await chrome.cookies.getAll({ partitionKey: {} });
-            if (Array.isArray(allPart)) {
-                allPart.forEach(c => {
-                    if (c && c.domain && (c.domain.includes("facebook.com") || c.domain.includes("fb.com"))) {
-                        addCookie(c);
-                    }
-                });
-            }
-        } catch (e) { }
-
-        // Tự động khôi phục c_user từ UID nếu chưa có
-        if (!cookieMap.has("c_user")) {
-            if (userId && userId !== "0") {
-                cookieMap.set("c_user", userId);
-            } else if (cookieMap.has("i_user")) {
-                cookieMap.set("c_user", cookieMap.get("i_user"));
-                userId = cookieMap.get("i_user");
-            }
-        }
-
-        if (!userId && cookieMap.has("c_user")) {
-            userId = cookieMap.get("c_user");
-        }
-
-        // Tạo chuỗi Cookie
-        let cookiePairs = [];
-        for (let [name, val] of cookieMap.entries()) {
-            cookiePairs.push(`${name}=${val}`);
-        }
-        let cookieStr = cookiePairs.join("; ");
-
-        // Kiểm tra hợp lệ
-        if (!fb_dtsg && !cookieMap.has("c_user") && !userId) {
-            status.innerHTML = "❌ <b>Không trích xuất được thông tin đăng nhập!</b><br><small style='color:#fca5a5'>Vui lòng F5 lại tab Facebook và đảm bảo bạn đã đăng nhập.</small>";
-            status.style.color = "#ef4444";
-            btn.disabled = false;
-            btn.style.opacity = '1';
-            return;
-        }
-
-        const hasXs = cookieMap.has("xs");
-        const hasCUser = cookieMap.has("c_user") || Boolean(userId);
-        const userAgent = navigator.userAgent;
-
-        let config = { serverUrl: "http://127.0.0.1:8888", clientId: "default" };
-        try {
-            if (chrome.storage && chrome.storage.local) {
-                config = await new Promise(resolve => {
-                    chrome.storage.local.get({ serverUrl: "http://127.0.0.1:8888", clientId: "default" }, resolve);
-                });
-            }
-        } catch (storageErr) {
-            console.warn("[Proxify Popup] Không thể đọc chrome.storage.local, dùng mặc định:", storageErr);
-        }
-        const activeServerUrl = (config.serverUrl || "http://127.0.0.1:8888").replace(/\/+$/, "");
-        const activeClientId = config.clientId || "default";
-
-        // Gửi qua API của Proxify
-        status.innerText = `Đang gửi vào Proxify (${activeClientId})...`;
-
-        const payload = {
-            cookie: cookieStr,
-            user_agent: userAgent,
-            fb_dtsg: fb_dtsg,
-            lsd: lsd,
-            sd: sd,
-            user_id: userId,
-            cookie_names: Array.from(cookieMap.keys()),
-            client_id: activeClientId
-        };
-
-        let success = false;
-        try {
-            const res = await fetch(`${activeServerUrl}/api/facebook/cookie`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if (data.status === "ok") success = true;
-        } catch (e) {
-            console.error("Failed to sync to primary serverUrl:", e);
-        }
-
-        if (success) {
-            let infoMsg = `✅ <b>ĐỒNG BỘ THÀNH CÔNG!</b><br>`;
-            infoMsg += `<small style="color:#a7f3d0">Client: <b>${activeClientId}</b> | UID: <b>${userId || 'Đã nhận'}</b></small><br>`;
-            infoMsg += `<small style="color:#94a3b8">Token: <b>${fb_dtsg ? fb_dtsg.slice(0, 10) + '...' : 'Đã nạp'}</b></small><br><br>`;
-            infoMsg += `<span style="font-size:11px;color:#94a3b8">💡 <b>Tiếp theo:</b> Mở Dashboard Proxify (${activeServerUrl}) và bấm <b>Bắt đầu thu thập</b>!</span>`;
-            status.innerHTML = infoMsg;
-            status.style.color = "#10b981";
-        } else {
-            status.innerHTML = `❌ <b>Lỗi kết nối Proxify!</b><br><small style='color:#fca5a5'>Không thể kết nối tới: ${activeServerUrl}</small>`;
-            status.style.color = "#ef4444";
-        }
-
-    } catch (e) {
-        status.innerText = "❌ Lỗi xử lý Extension: " + e.message;
-        status.style.color = "#ef4444";
-        console.error(e);
-    }
-
-    btn.disabled = false;
-    btn.style.opacity = '1';
-});
-
-// ─── Cấu hình Server URL & Client ID (Multi-Client) ──────────────────────────
+// ─── Cấu hình Proxy 1-Chạm & Server URL / DB Capture ─────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
     const serverUrlInput = document.getElementById("serverUrlInput");
-    const clientIdInput = document.getElementById("clientIdInput");
     const saveConfigBtn = document.getElementById("saveConfigBtn");
     const configStatus = document.getElementById("configStatus");
 
-    if (chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get({ serverUrl: "http://127.0.0.1:8888", clientId: "default" }, (items) => {
-            if (serverUrlInput) serverUrlInput.value = items.serverUrl || "http://127.0.0.1:8888";
-            if (clientIdInput) clientIdInput.value = items.clientId || "default";
+    const proxyStateBadge = document.getElementById("proxyStateBadge");
+    const proxyStateDesc = document.getElementById("proxyStateDesc");
+    const toggleProxyBtn = document.getElementById("toggleProxyBtn");
+
+    let isProxyCurrentlyEnabled = false;
+
+    function refreshProxyStateUI() {
+        if (!chrome.proxy || !chrome.proxy.settings) {
+            proxyStateBadge.innerText = "CẦN RELOAD";
+            proxyStateBadge.className = "proxy-badge locked";
+            proxyStateDesc.innerHTML = "Vui lòng vào <b>chrome://extensions</b> bấm biểu tượng <b>Reload (🔄)</b> ở tiện ích Proxify Helper để kích hoạt quyền Proxy.";
+            toggleProxyBtn.disabled = true;
+            toggleProxyBtn.style.opacity = "0.5";
+            return;
+        }
+
+        chrome.proxy.settings.get({ incognito: false }, (details) => {
+            if (!details || !details.value) return;
+            const mode = details.value.mode;
+            const level = details.levelOfControl;
+
+            if (level === "not_controllable" || level === "controlled_by_other_extensions") {
+                isProxyCurrentlyEnabled = (mode === "fixed_servers");
+                proxyStateBadge.innerText = "BỊ KHÓA (CẦN MỞ LẠI CHROME)";
+                proxyStateBadge.className = "proxy-badge locked";
+                proxyStateDesc.innerHTML =
+                    "Cửa sổ Chrome này đang chạy từ phiên cũ có gắn cờ <code>--proxy-server</code>.<br>" +
+                    "👉 Hãy <b>đóng toàn bộ Chrome rồi mở lại 1 lần</b> để nút Bật/Tắt có hiệu lực tức thì!";
+                toggleProxyBtn.innerText = "⚠️ Cần khởi động lại Chrome 1 lần";
+                toggleProxyBtn.className = "toggle-proxy-btn turn-off";
+            } else if (mode === "fixed_servers") {
+                isProxyCurrentlyEnabled = true;
+                proxyStateBadge.innerText = "ĐANG BẬT PROXIFY";
+                proxyStateBadge.className = "proxy-badge active";
+                proxyStateDesc.innerHTML = "Traffic mục tiêu đang đi qua <b>Proxify (127.0.0.1:8080)</b>.";
+                toggleProxyBtn.innerText = "🔴 Tắt Proxy (Về nguyên bản)";
+                toggleProxyBtn.className = "toggle-proxy-btn turn-off";
+            } else {
+                isProxyCurrentlyEnabled = false;
+                proxyStateBadge.innerText = "NGUYÊN BẢN (DIRECT)";
+                proxyStateBadge.className = "proxy-badge";
+                proxyStateDesc.innerHTML = "Chrome đang chạy <b>nguyên bản</b> (kết nối trực tiếp, không qua Proxify).";
+                toggleProxyBtn.innerText = "🟢 Bật Proxy Proxify (127.0.0.1:8080)";
+                toggleProxyBtn.className = "toggle-proxy-btn turn-on";
+            }
         });
+    }
+
+    refreshProxyStateUI();
+
+    if (toggleProxyBtn) {
+        toggleProxyBtn.addEventListener("click", () => {
+            const targetEnable = !isProxyCurrentlyEnabled;
+            toggleProxyBtn.disabled = true;
+            chrome.runtime.sendMessage(
+                { type: "SET_PROXY_MODE", enable: targetEnable, host: "127.0.0.1", port: 8080 },
+                () => {
+                    toggleProxyBtn.disabled = false;
+                    refreshProxyStateUI();
+                }
+            );
+        });
+    }
+
+    const dbStateBadge = document.getElementById("dbStateBadge");
+    const dbStateDesc = document.getElementById("dbStateDesc");
+    const toggleDbBtn = document.getElementById("toggleDbBtn");
+    const dbDomainSummary = document.getElementById("dbDomainSummary");
+    const dbDomainList = document.getElementById("dbDomainList");
+    const customDomainInput = document.getElementById("customDomainInput");
+    const addDomainBtn = document.getElementById("addDomainBtn");
+    const clearDomainsBtn = document.getElementById("clearDomainsBtn");
+
+    let isDbCurrentlyEnabled = false;
+    let dbAllowedDomains = [];
+    let capturedDomains = [];
+    let activeTabDomain = "";
+    let currentServerUrl = "http://127.0.0.1:8888";
+
+    if (chrome.tabs && chrome.tabs.query) {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs[0] && tabs[0].url) {
+                try {
+                    const u = new URL(tabs[0].url);
+                    if (u.protocol === "http:" || u.protocol === "https:") {
+                        activeTabDomain = u.hostname.replace(/^www\./, "");
+                        renderDbDomainList();
+                    }
+                } catch (e) {}
+            }
+        });
+    }
+
+    function updateDomainSummaryText() {
+        if (!dbDomainSummary) return;
+        if (dbAllowedDomains.length > 0) {
+            dbDomainSummary.innerText = `🎯 Lọc Ghi DB (${dbAllowedDomains.length} domain)`;
+            dbDomainSummary.style.color = "#34d399";
+        } else {
+            dbDomainSummary.innerText = "🎯 Lọc Ghi DB (Tất cả)";
+            dbDomainSummary.style.color = "#93c5fd";
+        }
+    }
+
+    async function saveAllowedDomainsToServer(newDomains) {
+        dbAllowedDomains = Array.from(new Set(newDomains.map(d => d.trim().toLowerCase()).filter(Boolean)));
+        updateDomainSummaryText();
+        renderDbDomainList();
+        try {
+            await fetch(`${currentServerUrl}/api/toggle_db`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ allowed_domains: dbAllowedDomains })
+            });
+        } catch (e) {
+            console.error("Failed to save allowed_domains:", e);
+        }
+    }
+
+    function renderDbDomainList() {
+        if (!dbDomainList) return;
+        updateDomainSummaryText();
+
+        const domainMap = new Map();
+        if (activeTabDomain) domainMap.set(activeTabDomain, null);
+
+        dbAllowedDomains.forEach(d => {
+            if (!domainMap.has(d)) domainMap.set(d, null);
+        });
+
+        capturedDomains.forEach(item => {
+            if (item && item.domain) {
+                domainMap.set(item.domain, item.count);
+            }
+        });
+
+        dbDomainList.innerHTML = "";
+        for (const [dom, count] of domainMap.entries()) {
+            const label = document.createElement("label");
+            label.className = "domain-item";
+
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.value = dom;
+            cb.checked = dbAllowedDomains.includes(dom);
+            cb.addEventListener("change", () => {
+                if (cb.checked) {
+                    saveAllowedDomainsToServer([...dbAllowedDomains, dom]);
+                } else {
+                    saveAllowedDomainsToServer(dbAllowedDomains.filter(x => x !== dom));
+                }
+            });
+
+            const span = document.createElement("span");
+            span.innerHTML = count !== null
+                ? `${dom} <small style="color:#71717a">(${count})</small>`
+                : `${dom} ${dom === activeTabDomain ? '<small style="color:#60a5fa">(Tab hiện tại)</small>' : ''}`;
+
+            label.appendChild(cb);
+            label.appendChild(span);
+            dbDomainList.appendChild(label);
+        }
+    }
+
+    if (addDomainBtn && customDomainInput) {
+        const handleAddCustom = () => {
+            let val = customDomainInput.value.trim().toLowerCase();
+            if (!val) return;
+            try {
+                if (val.includes("://")) val = new URL(val).hostname;
+            } catch (e) {}
+            customDomainInput.value = "";
+            if (val) {
+                saveAllowedDomainsToServer([...dbAllowedDomains, val]);
+            }
+        };
+        addDomainBtn.addEventListener("click", handleAddCustom);
+        customDomainInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") handleAddCustom();
+        });
+    }
+
+    if (clearDomainsBtn) {
+        clearDomainsBtn.addEventListener("click", () => {
+            saveAllowedDomainsToServer([]);
+        });
+    }
+
+    function renderDbStateUI(enabled, errorMsg = null) {
+        if (!dbStateBadge || !dbStateDesc || !toggleDbBtn) return;
+        if (errorMsg) {
+            dbStateBadge.innerText = "MẤT KẾT NỐI";
+            dbStateBadge.className = "proxy-badge locked";
+            dbStateDesc.innerHTML = `<span style="color:#fca5a5">${errorMsg}</span>`;
+            toggleDbBtn.innerText = "🔄 Thử kết nối lại Server";
+            toggleDbBtn.className = "toggle-proxy-btn turn-off";
+            return;
+        }
+        isDbCurrentlyEnabled = Boolean(enabled);
+        if (isDbCurrentlyEnabled) {
+            dbStateBadge.innerText = "ĐANG GHI DB";
+            dbStateBadge.className = "proxy-badge active";
+            dbStateDesc.innerHTML = "Server đang <b>lưu gói tin vào PostgreSQL</b>.";
+            toggleDbBtn.innerText = "🔴 Tắt Ghi DB";
+            toggleDbBtn.className = "toggle-proxy-btn turn-off";
+        } else {
+            dbStateBadge.innerText = "ĐANG TẮT";
+            dbStateBadge.className = "proxy-badge";
+            dbStateDesc.innerHTML = "Chế độ <b>Chỉ xem Live</b> (Không ghi xuống PostgreSQL).";
+            toggleDbBtn.innerText = "🟢 Bật Ghi DB (PostgreSQL)";
+            toggleDbBtn.className = "toggle-proxy-btn turn-on";
+        }
+    }
+
+    async function fetchDbStateFromServer(baseUrl) {
+        const cleanUrl = (baseUrl || currentServerUrl || "http://127.0.0.1:8888").replace(/\/+$/, "");
+        currentServerUrl = cleanUrl;
+        try {
+            const [cfgRes, domRes] = await Promise.all([
+                fetch(`${cleanUrl}/api/config`, { method: "GET" }),
+                fetch(`${cleanUrl}/api/domains`, { method: "GET" }).catch(() => null)
+            ]);
+            if (!cfgRes.ok) throw new Error(`HTTP ${cfgRes.status}`);
+            const data = await cfgRes.json();
+            if (Array.isArray(data.db_allowed_domains)) {
+                dbAllowedDomains = data.db_allowed_domains;
+            }
+            if (domRes && domRes.ok) {
+                const domData = await domRes.json();
+                if (Array.isArray(domData)) capturedDomains = domData;
+            }
+            renderDbStateUI(Boolean(data.db_integration_enabled));
+            renderDbDomainList();
+        } catch (err) {
+            renderDbStateUI(false, `Không kết nối được Proxify (${cleanUrl})`);
+        }
+    }
+
+    if (toggleDbBtn) {
+        toggleDbBtn.addEventListener("click", async () => {
+            if (dbStateBadge && dbStateBadge.innerText === "MẤT KẾT NỐI") {
+                await fetchDbStateFromServer(currentServerUrl);
+                return;
+            }
+            const targetState = !isDbCurrentlyEnabled;
+            toggleDbBtn.disabled = true;
+            try {
+                const res = await fetch(`${currentServerUrl}/api/toggle_db`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled: targetState })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                renderDbStateUI(Boolean(data.db_integration_enabled));
+            } catch (err) {
+                renderDbStateUI(isDbCurrentlyEnabled, `Lỗi khi đổi trạng thái DB (${err.message})`);
+            } finally {
+                toggleDbBtn.disabled = false;
+            }
+        });
+    }
+
+    if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get({ serverUrl: "http://127.0.0.1:8888" }, (items) => {
+            const sUrl = items.serverUrl || "http://127.0.0.1:8888";
+            if (serverUrlInput) serverUrlInput.value = sUrl;
+            fetchDbStateFromServer(sUrl);
+        });
+    } else {
+        fetchDbStateFromServer("http://127.0.0.1:8888");
     }
 
     if (saveConfigBtn) {
         saveConfigBtn.addEventListener("click", () => {
             let sUrl = (serverUrlInput ? serverUrlInput.value : "").trim().replace(/\/+$/, "");
             if (!sUrl) sUrl = "http://127.0.0.1:8888";
-            let cId = (clientIdInput ? clientIdInput.value : "").trim();
-            if (!cId) cId = "default";
 
-            chrome.storage.local.set({ serverUrl: sUrl, clientId: cId }, () => {
+            chrome.storage.local.set({ serverUrl: sUrl }, () => {
+                fetchDbStateFromServer(sUrl);
                 if (configStatus) {
-                    configStatus.innerText = `✅ Đã lưu (${cId})!`;
+                    configStatus.innerText = "✅ Đã lưu!";
                     configStatus.style.display = "block";
                     setTimeout(() => { configStatus.style.display = "none"; }, 2500);
                 }

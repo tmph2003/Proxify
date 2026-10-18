@@ -25,11 +25,6 @@
             transition: background 0.2s;
         }
         button:hover { background: #1d4ed8; }
-        #status { 
-            margin-top: 12px; 
-            font-size: 13px; 
-            min-height: 20px;
-        }
         .config-box {
             margin-top: 14px;
             text-align: left;
@@ -68,23 +63,165 @@
             font-size: 11px;
         }
         .save-btn:hover { background: #047857; }
+        .proxy-card {
+            background: #27272a;
+            border: 1px solid #3f3f46;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 14px;
+            text-align: left;
+        }
+        .proxy-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .proxy-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #e4e4e7;
+        }
+        .proxy-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 999px;
+            background: #3f3f46;
+            color: #a1a1aa;
+        }
+        .proxy-badge.active {
+            background: #065f46;
+            color: #34d399;
+        }
+        .proxy-badge.locked {
+            background: #7f1d1d;
+            color: #fca5a5;
+        }
+        .proxy-desc {
+            font-size: 11px;
+            color: #a1a1aa;
+            margin-bottom: 8px;
+            line-height: 1.35;
+        }
+        .toggle-proxy-btn {
+            padding: 8px;
+            font-size: 12px;
+            border-radius: 6px;
+        }
+        .toggle-proxy-btn.turn-on {
+            background: #059669;
+        }
+        .toggle-proxy-btn.turn-on:hover {
+            background: #047857;
+        }
+        .toggle-proxy-btn.turn-off {
+            background: #dc2626;
+        }
+        .toggle-proxy-btn.turn-off:hover {
+            background: #b91c1c;
+        }
+        .domain-filter-box {
+            margin-top: 8px;
+            border-top: 1px solid #3f3f46;
+            padding-top: 8px;
+        }
+        .domain-filter-box summary {
+            font-size: 11px;
+            color: #93c5fd;
+            cursor: pointer;
+            font-weight: 500;
+            user-select: none;
+        }
+        .domain-list {
+            margin-top: 6px;
+            max-height: 120px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            background: #18181b;
+            padding: 6px;
+            border-radius: 6px;
+            border: 1px solid #3f3f46;
+        }
+        .domain-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #d4d4d8;
+            cursor: pointer;
+        }
+        .domain-item input {
+            margin: 0;
+            cursor: pointer;
+        }
+        .domain-input-row {
+            display: flex;
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .domain-input-row input {
+            flex: 1;
+            padding: 4px 6px;
+            font-size: 11px;
+            border-radius: 4px;
+            border: 1px solid #3f3f46;
+            background: #18181b;
+            color: white;
+        }
+        .mini-btn {
+            width: auto;
+            padding: 4px 8px;
+            font-size: 11px;
+            border-radius: 4px;
+            background: #3b82f6;
+        }
+        .mini-btn.clear {
+            background: #52525b;
+            width: 100%;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body>
-    <h3>🍪 Proxify Extractor</h3>
-    <button id="getCookieBtn">Bắn Cookie vào Proxify</button>
-    <div id="status">Sẵn sàng</div>
+    <h3>🛡️ Proxify Helper</h3>
+
+    <div class="proxy-card">
+        <div class="proxy-header">
+            <span class="proxy-title">🌐 Proxy Chrome</span>
+            <span id="proxyStateBadge" class="proxy-badge">Đang kiểm tra...</span>
+        </div>
+        <div id="proxyStateDesc" class="proxy-desc">Đang đọc cấu hình proxy hiện tại...</div>
+        <button id="toggleProxyBtn" class="toggle-proxy-btn turn-on">Bật Proxy Proxify (127.0.0.1:8080)</button>
+    </div>
+
+    <div class="proxy-card">
+        <div class="proxy-header">
+            <span class="proxy-title">🗄️ Ghi dữ liệu vào DB</span>
+            <span id="dbStateBadge" class="proxy-badge">Đang kiểm tra...</span>
+        </div>
+        <div id="dbStateDesc" class="proxy-desc">Đang đồng bộ trạng thái với Server...</div>
+        <button id="toggleDbBtn" class="toggle-proxy-btn turn-on">Bật Ghi DB (PostgreSQL)</button>
+
+        <details class="domain-filter-box" id="dbDomainDetails">
+            <summary id="dbDomainSummary">🎯 Lọc Ghi DB (Tất cả)</summary>
+            <div class="domain-input-row">
+                <input type="text" id="customDomainInput" placeholder="Thêm domain (vd: example.com)">
+                <button id="addDomainBtn" class="mini-btn">+ Thêm</button>
+            </div>
+            <div id="dbDomainList" class="domain-list"></div>
+            <button id="clearDomainsBtn" class="mini-btn clear">Ghi tất cả Domains (Bỏ lọc)</button>
+        </details>
+    </div>
     
     <div class="config-box">
         <details id="configDetails">
-            <summary>⚙️ Cấu hình Server & Client ID</summary>
+            <summary>⚙️ Cấu hình Server</summary>
             <div class="form-group">
                 <label for="serverUrlInput">Server URL:</label>
                 <input type="text" id="serverUrlInput" placeholder="http://127.0.0.1:8888">
-            </div>
-            <div class="form-group">
-                <label for="clientIdInput">Client ID / Tenant:</label>
-                <input type="text" id="clientIdInput" placeholder="default">
             </div>
             <button id="saveConfigBtn" class="save-btn">Lưu cấu hình</button>
             <div id="configStatus" style="font-size:10px;margin-top:4px;color:#10b981;display:none;">Đã lưu!</div>

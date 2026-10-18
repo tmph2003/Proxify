@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../AppContext';
-import { getRequestDetails, getConfig, toggleDb, getDomains, exportRequests } from '../api/client';
+import { getRequestDetails, getConfig, getDomains, exportRequests } from '../api/client';
 
 export const DashboardPage: React.FC = () => {
     const { requests, clearRequests } = useAppContext();
@@ -13,10 +13,8 @@ export const DashboardPage: React.FC = () => {
     const [domainFilter, setDomainFilter] = useState(() => sessionStorage.getItem('domainFilter') || '');
     const [gqlFilter, setGqlFilter] = useState(() => sessionStorage.getItem('gqlFilter') === 'true');
     const [autoScroll, setAutoScroll] = useState(() => sessionStorage.getItem('autoScroll') !== 'false');
-    const [dbIntegrationEnabled, setDbIntegrationEnabled] = useState(() => sessionStorage.getItem('dbIntegrationEnabled') !== 'false');
+    const [dbIntegrationEnabled, setDbIntegrationEnabled] = useState(false);
     const [domains, setDomains] = useState<any[]>([]);
-    const [showDbDomainDropdown, setShowDbDomainDropdown] = useState(false);
-    const [dbAllowedDomains, setDbAllowedDomains] = useState<string[]>([]);
 
     React.useEffect(() => {
         getDomains().then(data => {
@@ -31,38 +29,15 @@ export const DashboardPage: React.FC = () => {
         sessionStorage.setItem('domainFilter', domainFilter);
         sessionStorage.setItem('gqlFilter', String(gqlFilter));
         sessionStorage.setItem('autoScroll', String(autoScroll));
-        sessionStorage.setItem('dbIntegrationEnabled', String(dbIntegrationEnabled));
-    }, [search, methodFilter, statusFilter, domainFilter, gqlFilter, autoScroll, dbIntegrationEnabled]);
+    }, [search, methodFilter, statusFilter, domainFilter, gqlFilter, autoScroll]);
 
     React.useEffect(() => {
-        // We still fetch from backend to sync the actual DB toggle state
         getConfig().then(data => {
-            if (data) {
-                if (data.db_integration_enabled !== undefined) setDbIntegrationEnabled(data.db_integration_enabled);
-                if (data.db_allowed_domains) setDbAllowedDomains(data.db_allowed_domains);
+            if (data && data.db_integration_enabled !== undefined) {
+                setDbIntegrationEnabled(data.db_integration_enabled);
             }
         }).catch(console.error);
     }, []);
-
-    const saveDbDomains = async () => {
-        try {
-            await toggleDb(dbIntegrationEnabled, dbAllowedDomains);
-            setShowDbDomainDropdown(false);
-        } catch (e) {
-            console.error('Failed to save DB domains', e);
-        }
-    };
-
-    const handleToggleDb = async () => {
-        const newState = !dbIntegrationEnabled;
-        setDbIntegrationEnabled(newState);
-        try {
-            await toggleDb(newState, dbAllowedDomains);
-        } catch (e) {
-            console.error('Failed to toggle DB integration', e);
-            setDbIntegrationEnabled(!newState); // revert on failure
-        }
-    };
 
     const handleSelect = async (id: number) => {
         setSelectedId(id);
@@ -148,45 +123,6 @@ export const DashboardPage: React.FC = () => {
                             <option key={d.domain} value={d.domain}>{d.domain} ({d.count})</option>
                         ))}
                     </select>
-                    <div style={{ position: 'relative', display: 'inline-block' }}>
-                        <button 
-                            className={`filter-btn ${dbAllowedDomains.length > 0 ? 'active' : ''}`} 
-                            id="dbDomainBtn"
-                            onClick={() => setShowDbDomainDropdown(!showDbDomainDropdown)}
-                        >
-                            🎯 Lọc Ghi DB {dbAllowedDomains.length > 0 ? `(${dbAllowedDomains.length})` : '(Tất cả)'}
-                        </button>
-                        {showDbDomainDropdown && (
-                            <div id="dbDomainDropdown" style={{ display: 'block', position: 'absolute', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', zIndex: 100, minWidth: '250px', maxHeight: '350px', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', top: '100%', left: 0, marginTop: '4px' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    {domains.map((d: any) => (
-                                        <label key={d.domain} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                            <input 
-                                                type="checkbox" 
-                                                value={d.domain} 
-                                                checked={dbAllowedDomains.includes(d.domain)}
-                                                onChange={e => {
-                                                    if (e.target.checked) setDbAllowedDomains([...dbAllowedDomains, d.domain]);
-                                                    else setDbAllowedDomains(dbAllowedDomains.filter(x => x !== d.domain));
-                                                }}
-                                            />
-                                            {d.domain} <span style={{ opacity: 0.5 }}>({d.count})</span>
-                                        </label>
-                                    ))}
-                                    {domains.length === 0 && <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Chưa có domain nào</div>}
-                                    <button onClick={saveDbDomains} style={{ marginTop: '8px', width: '100%', padding: '6px', background: 'var(--accent)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>Lưu thiết lập</button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    <button 
-                        className={`filter-btn ${dbIntegrationEnabled ? 'active' : ''}`} 
-                        id="dbToggleBtn"
-                        onClick={handleToggleDb}
-                        style={dbIntegrationEnabled ? { borderColor: 'var(--green)', color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)' } : {}}
-                    >
-                        {dbIntegrationEnabled ? '🟢 Ghi DB: BẬT' : '🔴 Ghi DB: TẮT'}
-                    </button>
                     <button 
                         className={`filter-btn ${gqlFilter ? 'active' : ''}`} 
                         id="gqlFilter"
@@ -264,7 +200,11 @@ export const DashboardPage: React.FC = () => {
                                 <>
                                     <div className="icon">⚡</div>
                                     <div className="text">Request LIVE</div>
-                                    <div className="subtext">Đang chờ lưu vào Database...</div>
+                                    <div className="subtext">
+                                        {dbIntegrationEnabled
+                                            ? 'Đang chờ lưu vào Database...'
+                                            : 'Ghi DB đang TẮT — bật Ghi DB để lưu và xem chi tiết request.'}
+                                    </div>
                                 </>
                             ) : (
                                 <>
