@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Proxify Helper",
-  "version": "2.0",
-  "description": "Proxify browser helper — 1-Click Proxy Toggle & DB Capture Controller",
+  "version": "1.6",
+  "description": "Proxify browser helper — 1-Click Proxy Toggle & DB Domain Filter",
   "permissions": [
     "proxy",
-    "activeTab",
+    "tabs",
+    "alarms",
     "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"

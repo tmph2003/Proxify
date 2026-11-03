@@ -1,0 +1,21 @@
+[package]
+name = "proxify-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "proxify-server"
+path = "src/main.rs"
+
+[dependencies]
+proxify-sdk = { path = "../proxify-sdk" }
+proxify-core = { path = "../proxify-core" }
+ext-youtube = { path = "../ext-youtube" }
+ext-zalo = { path = "../ext-zalo" }
+ext-facebook = { path = "../ext-facebook" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rustls.workspace = true
+axum.workspace = true
+mimalloc.workspace = true

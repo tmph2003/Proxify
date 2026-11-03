@@ -219,7 +219,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function fetchDbStateFromServer(baseUrl) {
-        const cleanUrl = (baseUrl || currentServerUrl || "http://127.0.0.1:8888").replace(/\/+$/, "");
+        let cleanUrl = (baseUrl || currentServerUrl || "http://127.0.0.1:8888").replace(/\/+$/, "");
+        if (cleanUrl === "http://127.0.0.1:8080" || cleanUrl === "http://localhost:8080") {
+            cleanUrl = cleanUrl.replace(":8080", ":8888");
+            if (serverUrlInput) serverUrlInput.value = cleanUrl;
+            if (chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ serverUrl: cleanUrl });
+            }
+        }
         currentServerUrl = cleanUrl;
         try {
             const [cfgRes, domRes] = await Promise.all([
@@ -234,8 +241,10 @@ document.addEventListener("DOMContentLoaded", () => {
             if (domRes && domRes.ok) {
                 const domData = await domRes.json();
                 if (Array.isArray(domData)) capturedDomains = domData;
+                else if (domData && Array.isArray(domData.domains)) capturedDomains = domData.domains;
             }
-            renderDbStateUI(Boolean(data.db_integration_enabled));
+            const dbEnabled = data.db_integration_enabled !== undefined ? data.db_integration_enabled : data.save_to_db;
+            renderDbStateUI(Boolean(dbEnabled));
             renderDbDomainList();
         } catch (err) {
             renderDbStateUI(false, `Không kết nối được Proxify (${cleanUrl})`);
@@ -258,7 +267,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                renderDbStateUI(Boolean(data.db_integration_enabled));
+                const dbEnabled = data.db_integration_enabled !== undefined ? data.db_integration_enabled : data.save_to_db;
+                renderDbStateUI(Boolean(dbEnabled));
             } catch (err) {
                 renderDbStateUI(isDbCurrentlyEnabled, `Lỗi khi đổi trạng thái DB (${err.message})`);
             } finally {

@@ -1,11 +1,12 @@
 services:
   proxify:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: proxify_app
     ports:
       # Ánh xạ port proxy (8080) ra máy host
       - "8080:8080"
-      # - "51920:51820/udp" # Tạm tắt do trùng dải dynamic port exclusion của Windows Hyper-V
     environment:
       - PROXY_HOST=0.0.0.0
       - PROXY_PORT=8080
@@ -16,23 +17,22 @@ services:
       - SPOOF_DOMAINS=${SPOOF_DOMAINS:-}
       - IGNORE_HOSTS=${IGNORE_HOSTS:-googlevideo.com,c.youtube.com,accounts.youtube.com,signaler-pa.youtube.com,accounts.google.com,clients6.google.com,client-channel.google.com,gvt1.com,gvt2.com,gvt3.com,1e100.net,nel.goog,msftncsi.com,windowsupdate.com}
       - DB_DSN=postgresql://proxify_user:proxify_pass@db:5432/proxify_db
-      - DB_INTEGRATION_ENABLED=${DB_INTEGRATION_ENABLED:-false}
+      - DB_INTEGRATION_ENABLED=${DB_INTEGRATION_ENABLED:-true}
       - RECORD_RETENTION_DAYS=${RECORD_RETENTION_DAYS:-7}
       - PROXIFY_EXTENSIONS_DIR=/app/extensions
-    command: ["python", "-m", "proxify"]
+      - PROXIFY_CA_DIR=/root/.mitmproxy
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import socket; s1 = socket.socket(); s1.connect(('127.0.0.1', 8080)); s1.close(); s2 = socket.socket(); s2.connect(('127.0.0.1', 8888)); s2.close()\""]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8888/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 10s
     restart: unless-stopped
     volumes:
       - ~/.mitmproxy:/root/.mitmproxy
-      - ./backend:/app
       - ./private/extensions:/app/extensions
 
   ui:
@@ -61,7 +61,6 @@ services:
       - POSTGRES_PASSWORD=proxify_pass
       - POSTGRES_DB=proxify_db
     ports:
-      # Mở port DB ra ngoài nếu bạn muốn dùng DBeaver kết nối vào xem data
       - "5432:5432"
     volumes:
       - proxify_pgdata:/var/lib/postgresql/data
@@ -79,7 +78,4 @@ networks:
   default:
     driver: bridge
     driver_opts:
-      # Đồng bộ MTU 1420 với card Wi-Fi host (tránh hiện tượng Docker mặc định MTU 1500 đàm phán
-      # TCP MSS=1448 gây rớt gói DF / TCP retransmission trên đường truyền PPPoE / Router phụ ở nhà)
       com.docker.network.driver.mtu: "1420"
-

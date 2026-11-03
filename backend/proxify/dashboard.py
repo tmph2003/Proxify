@@ -26,8 +26,22 @@ class Dashboard:
         self.host = host
         self.port = port
         self.ws_clients: set[web.WebSocketResponse] = set()
-        self.app = web.Application(client_max_size=50 * 1024 * 1024)
+        self.app = web.Application(
+            client_max_size=50 * 1024 * 1024,
+            middlewares=[self._cors_middleware],
+        )
         self._setup_routes()
+
+    @web.middleware
+    async def _cors_middleware(self, request: web.Request, handler):
+        if request.method == "OPTIONS":
+            response = web.Response(status=204)
+        else:
+            response = await handler(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
 
     def _setup_routes(self):
         # Serve API endpoints first
