@@ -24,7 +24,6 @@ def parse_retention_days(val: Any, default: int = 7) -> int:
     return default
 
 _COMMIT_BATCH_SIZE = int(os.getenv("COMMIT_BATCH_SIZE", "50"))
-DB_DSN = os.getenv("DB_DSN", "postgresql://proxify_user:proxify_pass@localhost:5432/proxify_db")
 DEFAULT_RETENTION_DAYS = parse_retention_days(
     os.getenv("RECORD_RETENTION_DAYS", os.getenv("RETENTION_DAYS", "7")),
     default=7,
@@ -32,10 +31,9 @@ DEFAULT_RETENTION_DAYS = parse_retention_days(
 
 
 class RequestStorage:
-    """Thread-safe PostgreSQL storage for HTTP request/response data."""
+    """Thread-safe SQLite storage for HTTP request/response data."""
 
-    def __init__(self, db_dsn: str = DB_DSN, retention_days: Optional[int] = None):
-        self.db_dsn = db_dsn
+    def __init__(self, retention_days: Optional[int] = None):
         self.db_integration_enabled = os.getenv("DB_INTEGRATION_ENABLED", "false").lower() == "true"
         self.db_allowed_domains = []
         self.retention_days = parse_retention_days(
@@ -51,18 +49,15 @@ class RequestStorage:
         else:
             self._db_available = False
             logger.warning(
-                "⚠️  PostgreSQL not available. "
+                "⚠️  SQLite database not available. "
                 "Proxy will run without DB storage. JS hooks still work."
             )
         
         self.repository = RequestRepository()
         
         if self._db_available:
-            conn = self._pool.get_connection()
-            try:
+            with self._pool.connection() as conn:
                 self.repository.init_db(conn)
-            finally:
-                self._pool.release_connection(conn)
             
             # Initialize and start workers
             self.ttl_worker = TTLWorker(self._pool, self.repository, retention_days=self.retention_days)
@@ -141,11 +136,8 @@ class RequestStorage:
         if not self._db_available:
             return 0
         params = self._prepare_request_data(data)
-        conn = self._pool.get_connection()
-        try:
+        with self._pool.connection() as conn:
             return self.repository.save_request(conn, params)
-        finally:
-            self._pool.release_connection(conn)
 
     def save_request_async(self, data: dict, callback=None):
         """Queue a request to be saved asynchronously."""
@@ -158,7 +150,6 @@ class RequestStorage:
         """Get a single request by ID."""
         if not self._db_available:
             return None
-        self.flush()
         return self.repository.get_request(self._pool, request_id)
 
     def query_requests(
@@ -175,7 +166,6 @@ class RequestStorage:
         """Query requests with filters."""
         if not self._db_available:
             return []
-        self.flush()
         return self.repository.query_requests(
             self._pool, domain, method, status_code, search, graphql_only, limit, offset, since
         )
@@ -184,14 +174,12 @@ class RequestStorage:
         """Get all unique domains with request counts."""
         if not self._db_available:
             return []
-        self.flush()
         return self.repository.get_domains(self._pool, since)
 
     def get_stats(self, since: Optional[float] = None) -> dict:
         """Get overall capture statistics."""
         if not self._db_available:
             return {}
-        self.flush()
         return self.repository.get_stats(self._pool, since)
 
     def get_requests_for_export(
@@ -200,7 +188,6 @@ class RequestStorage:
         """Get full request data for export."""
         if not self._db_available:
             return []
-        self.flush()
         return self.repository.get_requests_for_export(self._pool, ids, **filters)
 
     def delete_requests(self, ids: Optional[list[int]] = None):

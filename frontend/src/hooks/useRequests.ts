@@ -23,6 +23,12 @@ export const useRequests = () => {
     const [stats, setStats] = useState({ requests: 0, domains: 0, graphql: 0 });
     const [connected, setConnected] = useState(false);
 
+    const normalizeStats = (data: any) => ({
+        requests: Number(data?.requests ?? data?.total_requests ?? 0) || 0,
+        domains: Number(data?.domains ?? data?.unique_domains ?? 0) || 0,
+        graphql: Number(data?.graphql ?? data?.graphql_requests ?? 0) || 0,
+    });
+
     // Initial load
     useEffect(() => {
         getRequests({ limit: 100 }).then(data => {
@@ -32,7 +38,7 @@ export const useRequests = () => {
         }).catch(console.error);
 
         getStats().then(data => {
-            if (data) setStats(data);
+            if (data) setStats(normalizeStats(data));
         }).catch(console.error);
     }, []);
 
@@ -56,7 +62,7 @@ export const useRequests = () => {
                     if (msg.type === 'new_request') {
                         setRequests(prev => [msg.data, ...prev].slice(0, 500)); // Keep last 500
                         getStats().then(data => {
-                            if (data) setStats(data);
+                            if (data) setStats(normalizeStats(data));
                         });
                     } else if (msg.type === 'update_id') {
                         setRequests(prev => prev.map(r => 
@@ -93,5 +99,13 @@ export const useRequests = () => {
         setRequests([]);
     }, []);
 
-    return { requests, stats, connected, clearRequests };
+    const effectiveStats = stats.requests > 0 || requests.length === 0
+        ? stats
+        : {
+            requests: requests.length,
+            domains: new Set(requests.map(r => r.domain).filter(Boolean)).size,
+            graphql: requests.filter(r => Boolean(r.is_graphql)).length,
+        };
+
+    return { requests, stats: effectiveStats, connected, clearRequests };
 };

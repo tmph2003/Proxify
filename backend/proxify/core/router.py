@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import OrderedDict
 from typing import Dict, List, Set, Optional, Tuple
 from urllib.parse import urlparse
 from mitmproxy import http
@@ -15,10 +16,16 @@ _STREAM_EXTENSIONS = (
     ".woff", ".woff2", ".ttf", ".eot", ".otf",
     ".mp4", ".mp3", ".wav", ".ogg", ".webm", ".avi", ".mkv", ".flv",
     ".css", ".map",  # stylesheets & source maps (never modified by any plugin)
+    ".zip", ".7z", ".tar", ".gz", ".iso", ".bin", ".exe", ".msi", ".pdf",
+    ".apk", ".dmg", ".pkg", ".bz2", ".xz",  # binary archives and installers (OOM protection)
 )
 
 # Content-types that are safe to stream unconditionally (no plugin ever modifies these)
-_STREAM_CONTENT_TYPES = ("image/", "font/", "application/font", "application/x-font", "text/css")
+_STREAM_CONTENT_TYPES = (
+    "image/", "font/", "application/font", "application/x-font", "text/css",
+    "application/octet-stream", "application/pdf", "application/zip",
+    "application/x-zip-compressed", "application/x-tar", "application/gzip",
+)
 
 # JavaScript extensions and content-types that should be streamed whenever no mutator
 # needs to inspect/rewrite JS on that domain (eliminates store-and-forward lag on 1-4MB JS bundles).
@@ -42,13 +49,21 @@ class ProxyRouter:
     O(depth) Radix Trie Router for matching domains (including wildcards/subdomains).
     Domains are inserted in reverse order (e.g., com -> example -> api).
     """
-    def __init__(self, ignored_hosts: Optional[List[str]] = None):
+    def __init__(self, ignored_hosts: Optional[List[str]] = None, cache_maxsize: int = 2048):
         self.root = TrieNode()
         self.global_observers: List[IObserverInterceptor] = []
         self.global_mutators: List[IMutatorInterceptor] = []
         self.ignored_hosts: List[str] = [h.strip().lstrip("*.").split(":", 1)[0].lower() for h in (ignored_hosts or []) if h.strip()]
         self.stream_domains: Set[str] = {d.split(":", 1)[0].strip().lower() for d in _STREAM_DOMAINS}
         self.record_filters: List = []
+        self._cache_maxsize = cache_maxsize
+        self._search_cache: OrderedDict[str, Tuple[List[IObserverInterceptor], List[IMutatorInterceptor]]] = OrderedDict()
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    def invalidate_cache(self) -> None:
+        """Invalidate all cached domain search results."""
+        self._search_cache.clear()
 
     def register_record_filter(self, predicate) -> None:
         if callable(predicate) and predicate not in self.record_filters:
@@ -102,6 +117,7 @@ class ProxyRouter:
             curr.observers.append(interceptor)
 
     def register_observer(self, observer: IObserverInterceptor):
+        self.invalidate_cache()
         if not observer.target_domains:
             self.global_observers.append(observer)
             return
@@ -109,6 +125,7 @@ class ProxyRouter:
             self._insert(domain, observer, False)
 
     def register_mutator(self, mutator: IMutatorInterceptor):
+        self.invalidate_cache()
         if not mutator.target_domains:
             self.global_mutators.append(mutator)
             return
@@ -117,13 +134,20 @@ class ProxyRouter:
 
     def _search(self, domain: Optional[str]) -> Tuple[List[IObserverInterceptor], List[IMutatorInterceptor]]:
         """Finds all interceptors matching the domain and its parent domains."""
+        clean_domain = domain.split(":", 1)[0].strip().lower() if domain else ""
+
+        # Check LRU cache
+        if clean_domain in self._search_cache:
+            self._search_cache.move_to_end(clean_domain)
+            self._cache_hits += 1
+            obs, mut = self._search_cache[clean_domain]
+            return list(obs), list(mut)
+
+        self._cache_misses += 1
         matched_observers = list(self.global_observers)
         matched_mutators = list(self.global_mutators)
-        if not domain:
-            return matched_observers, matched_mutators
-
-        clean_domain = domain.split(":", 1)[0].strip().lower()
         if not clean_domain:
+            self._search_cache[clean_domain] = (list(matched_observers), list(matched_mutators))
             return matched_observers, matched_mutators
 
         parts = clean_domain.strip('.').split('.')
@@ -153,6 +177,11 @@ class ProxyRouter:
                 seen_mut.add(mut)
                 unique_mutators.append(mut)
 
+        # Evict oldest entry if capacity reached
+        if len(self._search_cache) >= self._cache_maxsize:
+            self._search_cache.popitem(last=False)
+
+        self._search_cache[clean_domain] = (list(unique_observers), list(unique_mutators))
         return unique_observers, unique_mutators
 
     async def route_request(self, flow: http.HTTPFlow) -> None:
@@ -207,9 +236,13 @@ class ProxyRouter:
             flow.response.stream = True
             return
 
-        # 4. Stream static assets by URL extension (images, fonts, stylesheets, source maps, media)
-        url = flow.request.pretty_url or ""
-        path = urlparse(url).path.lower()
+        # 4. Stream static assets by URL extension (images, fonts, stylesheets, source maps, media, archives)
+        raw_path = getattr(flow.request, "path", None)
+        if raw_path is None or not isinstance(raw_path, str):
+            url = getattr(flow.request, "pretty_url", "") or ""
+            path = urlparse(url).path.lower() if isinstance(url, str) else ""
+        else:
+            path = raw_path.split("?")[0].split("#")[0].lower()
         if path.endswith(_STREAM_EXTENSIONS):
             flow.response.stream = True
             return

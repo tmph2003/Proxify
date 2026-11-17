@@ -1,8 +1,8 @@
 import asyncio
 import logging
 import time
+import json
 from typing import Any, List, Dict
-import asyncpg
 
 logger = logging.getLogger("proxify.core.eventbus")
 
@@ -10,10 +10,12 @@ class AsyncEventBus:
     """
     High-performance Event Bus with Backpressure and Micro-batching.
     Used to decouple real-time proxy traffic from heavy Database IO.
+
+    Migrated from asyncpg to aiosqlite.
     """
-    def __init__(self, db_pool: asyncpg.Pool, max_queue_size: int = 5000, batch_size: int = 500, flush_interval: float = 1.0):
+    def __init__(self, db_pool, max_queue_size: int = 5000, batch_size: int = 500, flush_interval: float = 1.0):
         self.queue = asyncio.Queue(maxsize=max_queue_size)
-        self.db_pool = db_pool
+        self.db_pool = db_pool  # aiosqlite.Connection (from DatabaseManager)
         self.batch_size = batch_size
         self.flush_interval = flush_interval
         self._consumer_task = None
@@ -56,7 +58,6 @@ class AsyncEventBus:
             self.queue.put_nowait(event)
         except asyncio.QueueFull:
             # TCP Backpressure fallback: Drop event to save memory and avoid freezing proxy.
-            # In a critical setup, we would spool to SQLite here.
             logger.critical(f"EventBus Queue Full! Dropping event on topic {topic} to prevent OOM.")
 
     async def _consumer_loop(self):
@@ -80,27 +81,27 @@ class AsyncEventBus:
                 batch.clear()
 
     async def _bulk_insert(self, batch: List[Dict[str, Any]]):
-        """Performs a bulk insert of the batch into the raw_payloads table."""
+        """Performs a bulk insert of the batch into the core_raw_payloads table."""
         if not batch:
             return
 
-        if not self.db_pool or getattr(self.db_pool, '_closed', False):
+        if not self.db_pool:
             logger.warning("Database pool is closed or unavailable. Skipping bulk insert.")
             return
 
         try:
-            import json
-            # Prepare records for asyncpg (must match columns: topic, data, created_at)
-            records = [(item['topic'], json.dumps(item['data']), item['timestamp']) for item in batch]
+            # Prepare records for aiosqlite
+            records = [
+                (item['topic'], json.dumps(item['data']), 
+                 time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(item['timestamp'])))
+                for item in batch
+            ]
             
-            # Use executemany for now. For absolute max speed, copy_records_to_table is better.
-            async with self.db_pool.acquire() as conn:
-                await conn.executemany(
-                    "INSERT INTO core.raw_payloads (topic, raw_data, created_at) VALUES ($1, $2, to_timestamp($3))",
-                    records
-                )
+            await self.db_pool.executemany(
+                "INSERT INTO core_raw_payloads (topic, raw_data, created_at) VALUES (?, ?, ?)",
+                records
+            )
+            await self.db_pool.commit()
             logger.debug(f"Flushed batch of {len(batch)} events to DB.")
         except Exception as e:
             logger.error(f"Failed to bulk insert {len(batch)} events: {e}")
-            # Fallback strategy: In a real system, we would chop the batch in half and retry
-            # to isolate the single bad record that caused the failure.

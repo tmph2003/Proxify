@@ -24,7 +24,7 @@ class ExtensionContext:
     Capability gateway exposed to extensions during `initialize()`.
 
     Decouples extension code from mitmproxy internals, aiohttp server setup,
-    and PostgreSQL connection management.
+    and SQLite connection management.
     """
 
     def __init__(
@@ -32,8 +32,8 @@ class ExtensionContext:
         extension_id: str,
         router: Any,                      # ProxyRouter instance
         dashboard_app: web.Application,   # aiohttp web.Application
-        db_manager: Any,                  # DatabaseManager (asyncpg pool)
-        sync_db_pool: Any,                # DatabasePool (psycopg2 pool)
+        db_manager: Any,                  # DatabaseManager (aiosqlite)
+        sync_db_pool: Any,                # DatabasePool (sqlite3)
         worker: Any,                       # BackgroundWorker
         filter_instance: Optional[Any] = None, # PollingEndpointFilter
         event_bus: Optional[Any] = None,
@@ -194,7 +194,7 @@ class ExtensionContext:
         Register an asynchronous consumer for events in `core.raw_payloads` matching `topic`.
 
         Signature:
-            async def handler(payload: dict, conn: asyncpg.Connection) -> None
+            async def handler(payload: dict, conn) -> None
         """
         self._worker.register_topic_handler(topic, handler)
         logger.debug(f"[{self.extension_id}] Registered CQRS topic handler for: {topic}")
@@ -205,12 +205,16 @@ class ExtensionContext:
     # ─── 4. Database Schema Initializers & Pools ────────────────────────────
 
     def get_sync_db_pool(self) -> Any:
-        """Return the shared psycopg2 ThreadedConnectionPool for synchronous operations."""
+        """Return the shared SQLite DatabasePool for synchronous operations."""
         return self._sync_pool
 
     def get_async_db_pool(self) -> Any:
-        """Return the shared asyncpg Connection Pool for asynchronous operations."""
+        """Return the shared aiosqlite Connection for asynchronous operations."""
         return self._db_manager.pool
+
+    def get_db_manager(self) -> Any:
+        """Return the DatabaseManager instance for acquiring async connections."""
+        return self._db_manager
 
     def register_db_initializer(
         self,

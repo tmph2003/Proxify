@@ -52,4 +52,14 @@ frontend/src/pages/Facebook.tsx
 frontend/src/pages/Zalo.tsx
 frontend/src/hooks/useFacebook.ts
 frontend/src/hooks/useZalo.ts
+
+# Standalone Binaries, Local SQLite Databases & Build Reports
+*.exe
+*.db
+*.db-shm
+*.db-wal
+reports/
+target/
+backend/proxify/_compiled_extensions.py
+
 

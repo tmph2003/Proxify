@@ -92,12 +92,21 @@ async def test_proxy_router_stream_domains_strict():
 @pytest.mark.anyio
 async def test_database_manager_connect_retry_resilience():
     db = DatabaseManager()
-    mock_pool = MagicMock()
-    mock_create = AsyncMock(side_effect=[Exception("DB starting up"), mock_pool])
-    with patch("asyncpg.create_pool", new=mock_create):
-        with patch.object(db, "_init_core_schema", new_callable=AsyncMock):
-            await db.connect("postgresql://test:test@localhost:5432/test", max_retries=2, retry_interval=0.01)
-            assert db.pool == mock_pool
+    mock_conn = AsyncMock()
+    mock_conn.execute = AsyncMock()
+    mock_connect = AsyncMock(side_effect=[Exception("DB locked"), mock_conn])
+    with patch("aiosqlite.connect", new=mock_connect):
+        with patch.object(db, "_init_core_schema", new_callable=AsyncMock) as mock_schema:
+            await db.connect("test.db", max_retries=2, retry_interval=0.01)
+            assert db.pool == mock_conn
+            assert mock_connect.call_count == 2
+            mock_schema.assert_awaited_once()
+
+    # Verify that exhausting retries raises exception
+    failing_connect = AsyncMock(side_effect=Exception("Persistent connection failure"))
+    with patch("aiosqlite.connect", new=failing_connect):
+        with pytest.raises(Exception, match="Persistent connection failure"):
+            await db.connect("fail.db", max_retries=2, retry_interval=0.01)
 
 
 @pytest.mark.anyio
@@ -202,17 +211,36 @@ async def test_dashboard_toggle_db_invalid_json_handled():
 
 
 def test_database_pool_recreates_closed_pool():
+    import sqlite3
     from proxify.database.connection import DatabasePool
-    dbp = DatabasePool(dsn="postgresql://invalid:invalid@localhost:5432/none")
-    fake_pool = MagicMock()
-    fake_pool.closed = True
-    dbp._pool = fake_pool
+    dbp = DatabasePool(db_path=":memory:")
 
-    with patch("psycopg2.pool.ThreadedConnectionPool") as mock_tcp:
-        mock_tcp.return_value = MagicMock()
-        p = dbp._ensure_pool()
-        assert p != fake_pool
-        mock_tcp.assert_called_once()
+    # 1. Acquire initial SQLite connection
+    conn1 = dbp.get_connection()
+    assert conn1 is not None
+    assert isinstance(conn1, sqlite3.Connection)
+    assert dbp._conn is conn1
+
+    # 2. Close connection pool
+    dbp.close()
+    assert dbp._conn is None
+
+    # 3. Requesting connection again recreates new SQLite connection
+    conn2 = dbp.get_connection()
+    assert conn2 is not None
+    assert isinstance(conn2, sqlite3.Connection)
+    assert conn2 != conn1
+    assert dbp._conn is conn2
+
+    # 4. Context manager connection() works after close
+    dbp.close()
+    assert dbp._conn is None
+    with dbp.connection() as conn3:
+        assert conn3 is not None
+        assert isinstance(conn3, sqlite3.Connection)
+        assert conn3 != conn2
+
+    dbp.close()
 
 
 def test_router_search_deduplicates_interceptors_across_parent_and_child_domains():

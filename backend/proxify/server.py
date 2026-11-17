@@ -1,8 +1,23 @@
+import multiprocessing
+import sys
+from pathlib import Path
+
+# Direct execution bootstrap: ensure backend/ directory is on sys.path
+_backend_dir = str(Path(__file__).resolve().parent.parent)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
+
+multiprocessing.freeze_support()
+
+from proxify.utils.compat import _patch_nuitka_pyo3_builtins
+_patch_nuitka_pyo3_builtins()
+
 import asyncio
 import logging
 import os
 import socket
 from pathlib import Path
+from typing import Any, Callable, Optional
 from aiohttp import web
 from mitmproxy.tools.dump import DumpMaster
 from mitmproxy.options import Options
@@ -20,6 +35,46 @@ def _ipv4_only_getaddrinfo(host, port, family=0, *args, **kwargs):
     return _orig_getaddrinfo(host, port, family, *args, **kwargs)
 
 socket.getaddrinfo = _ipv4_only_getaddrinfo
+
+# Clean Architecture: Enable socket.TCP_NODELAY on all TCP streaming sockets to eliminate
+# Windows Nagle algorithm Delayed ACK latencies (40-200ms latency penalty).
+_orig_socket_cls = socket.socket
+
+class _NoDelaySocket(_orig_socket_cls):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        try:
+            if self.type & socket.SOCK_STREAM:
+                self.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+
+socket.socket = _NoDelaySocket
+
+# Clean Architecture: Expand Mitmproxy CertStore capacity to 2048 (default: 100)
+# to prevent eviction storms and expensive RSA-2048 re-signing operations under load.
+try:
+    import mitmproxy.certs
+    mitmproxy.certs.CertStore.STORE_CAP = 2048
+except Exception:
+    pass
+
+def windows_connection_reset_handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+    """
+    Custom asyncio exception handler to cleanly catch and suppress noisy Windows IOCP
+    [WinError 10054] ConnectionResetError exceptions resulting from abrupt client/browser
+    disconnects, while delegating all other unhandled exceptions to default exception handling.
+    """
+    exc = context.get("exception")
+    if exc is not None:
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError)):
+            return
+        if getattr(exc, "winerror", None) == 10054 or getattr(exc, "errno", None) == 10054:
+            return
+    msg = context.get("message", "")
+    if "10054" in msg or "ConnectionResetError" in msg:
+        return
+    loop.default_exception_handler(context)
 
 from proxify.core.database import DatabaseManager
 from proxify.core.eventbus import AsyncEventBus
@@ -106,12 +161,8 @@ class V1GlobalObserver:
             return
         raw_host = flow.request.pretty_host or ""
         domain = raw_host.split(":", 1)[0].strip().lower()
-        if any(
-            domain == h 
-            or domain.endswith('.' + h) 
-            or (h.endswith('*') and domain.startswith(h.rstrip('*')))
-            for h in self.ignored_hosts
-        ):
+        # ProxyRouter.is_ignored(host) already filters ignored hosts before dispatching to observers.
+        if self.router and self.router.is_ignored(raw_host):
             return
 
         # Skip requests matched by any registered record filter (e.g., streaming/telemetry noise)
@@ -145,12 +196,27 @@ async def start_dashboard(dashboard_instance, port=8888):
     logger.info(f"Dashboard running on port {port}")
     return runner
 
-async def run_server():
+async def run_server(
+    on_master_ready: Optional[Callable[[Any, asyncio.AbstractEventLoop], None]] = None,
+    enable_termlog: Optional[bool] = None,
+):
     """Single Event Loop Execution for Proxify v2"""
-    # 1. Initialize Database
-    dsn = os.getenv("DB_DSN", "postgresql://proxify_user:proxify_pass@localhost:5432/proxify_db")
+    # 0. Windows IOCP Event Loop Tuning: Suppress WinError 10054 ConnectionReset noise
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(windows_connection_reset_handler)
+
+    # 0.5. Expand Mitmproxy CertStore capacity to 2048 to prevent eviction storms
+    try:
+        import mitmproxy.certs
+        mitmproxy.certs.CertStore.STORE_CAP = 2048
+    except Exception:
+        pass
+
+    # 1. Initialize Database (SQLite — standalone, no server needed)
+    from proxify.core.database import get_default_db_path
+    db_path = get_default_db_path()
     db_manager = DatabaseManager()
-    await db_manager.connect(dsn)
+    await db_manager.connect(db_path)
 
     # 2. Initialize AsyncEventBus and Background Worker
     event_bus = AsyncEventBus(db_pool=db_manager.pool)
@@ -218,7 +284,14 @@ async def run_server():
     if allow_patterns:
         opts_kwargs["allow_hosts"] = allow_patterns
     opts = Options(**opts_kwargs)
-    master = DumpMaster(opts, with_termlog=True, with_dumper=False)
+    if enable_termlog is None:
+        use_termlog = bool(
+            sys.stdout is not None
+            and not getattr(sys.stdout, "_is_proxify_log_stream", False)
+        )
+    else:
+        use_termlog = bool(enable_termlog)
+    master = DumpMaster(opts, with_termlog=use_termlog, with_dumper=False)
     master.addons.add(ProxyAddon(router))
 
     # 4.5. Initialize V1 RequestStorage and Global Observer
@@ -262,8 +335,25 @@ async def run_server():
         storage=storage,
     )
 
+    # 6.5 Mount embedded React SPA static files after all API routes are registered
+    dashboard_instance.mount_spa_static()
+
+    # 6.6 Ensure all loaded modules (including mitmproxy addons & OpenSSL wrappers)
+    # carry '__builtins__' in f_globals for PyO3/cryptography compatibility under Nuitka
+    try:
+        from proxify.utils.compat import _patch_nuitka_pyo3_builtins
+        _patch_nuitka_pyo3_builtins()
+    except Exception:
+        pass
+
     runner = await start_dashboard(dashboard_instance, port=dashboard_port)
     logger.info("✅ Server v2 started. Mitmproxy and Dashboard are running on a SINGLE EVENT LOOP.")
+
+    if on_master_ready is not None:
+        try:
+            on_master_ready(master, loop)
+        except Exception as e:
+            logger.warning(f"on_master_ready callback error: {e}")
 
     try:
         await master.run()

@@ -35,7 +35,7 @@ def test_repository_delete_old_requests_parameterized():
     mock_conn = MagicMock()
     mock_cur = MagicMock()
     mock_cur.rowcount = 42
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_conn.cursor.return_value = mock_cur
 
     # Test default 7 days retention
     now_epoch = 1700000000.0
@@ -52,8 +52,9 @@ def test_repository_delete_old_requests_parameterized():
     # First call must be the requests table deletion
     query, params = execute_calls[0][0]
     assert "DELETE FROM requests" in query
-    assert "timestamp_epoch < %s" in query
+    assert "timestamp_epoch < ?" in query
     assert params == (expected_cutoff,)
+    mock_cur.close.assert_called_once()
 
 
 def test_repository_delete_old_requests_backwards_compatible():
@@ -61,7 +62,7 @@ def test_repository_delete_old_requests_backwards_compatible():
     mock_conn = MagicMock()
     mock_cur = MagicMock()
     mock_cur.rowcount = 10
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_conn.cursor.return_value = mock_cur
 
     now_epoch = 1700000000.0
     with patch("time.time", return_value=now_epoch):
@@ -71,14 +72,17 @@ def test_repository_delete_old_requests_backwards_compatible():
     assert deleted == 10
     expected_cutoff = now_epoch - (3 * 86400.0)
     query, params = mock_cur.execute.call_args_list[0][0]
+    assert "DELETE FROM requests" in query
+    assert "timestamp_epoch < ?" in query
     assert params == (expected_cutoff,)
+    mock_cur.close.assert_called_once()
 
 
 def test_ttl_worker_passes_configured_retention():
     mock_pool = MagicMock()
     mock_repo = MagicMock()
     mock_conn = MagicMock()
-    mock_pool.get_connection.return_value = mock_conn
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
     mock_repo.delete_old_requests.return_value = 15
 
     worker = TTLWorker(mock_pool, mock_repo, retention_days=7)
@@ -89,8 +93,8 @@ def test_ttl_worker_passes_configured_retention():
     with patch.object(worker._stop_event, "wait", return_value=False):
         worker.do_work()
 
+    mock_pool.connection.assert_called_once()
     mock_repo.delete_old_requests.assert_called_once_with(mock_conn, retention_days=7)
-    mock_pool.release_connection.assert_called_once_with(mock_conn)
 
 
 @pytest.mark.anyio

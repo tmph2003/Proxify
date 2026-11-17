@@ -9,7 +9,9 @@ logger = logging.getLogger("proxify.core.worker")
 class BackgroundWorker:
     """
     Offline Data Normalizer (CQRS Architecture).
-    Reads from core.raw_payloads and dispatches events to registered topic handlers.
+    Reads from core_raw_payloads and dispatches events to registered topic handlers.
+
+    Migrated from asyncpg to aiosqlite.
     """
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
@@ -51,39 +53,44 @@ class BackgroundWorker:
             await asyncio.sleep(2.0)
 
     async def _process_batch(self):
-        if not self.db_manager.pool or getattr(self.db_manager.pool, '_closed', False):
+        if not self.db_manager.pool:
             return
 
-        # Fetch up to 100 unprocessed payloads
-        async with self.db_manager.pool.acquire() as conn:
-            records = await conn.fetch("""
-                SELECT id, topic, raw_data 
-                FROM core.raw_payloads 
-                WHERE processed = FALSE 
-                ORDER BY id ASC LIMIT 100
-            """)
-            
-            if not records:
-                return
+        try:
+            # Fetch up to 100 unprocessed payloads
+            async with self.db_manager.acquire() as conn:
+                records = await conn.fetch("""
+                    SELECT id, topic, raw_data 
+                    FROM core_raw_payloads 
+                    WHERE processed = 0 
+                    ORDER BY id ASC LIMIT 100
+                """)
+                
+                if not records:
+                    return
 
-            processed_ids = []
-            
-            for record in records:
-                try:
-                    payload = json.loads(record['raw_data'])
-                    topic = record['topic']
-                    handler = self._topic_handlers.get(topic)
-                    if handler is not None:
-                        await handler(payload, conn)
-                    processed_ids.append(record['id'])
-                except Exception as e:
-                    logger.error(f"Error processing payload {record['id']}: {e}")
-                    processed_ids.append(record['id'])
+                processed_ids = []
+                
+                for record in records:
+                    try:
+                        payload = json.loads(record['raw_data'])
+                        topic = record['topic']
+                        handler = self._topic_handlers.get(topic)
+                        if handler is not None:
+                            await handler(payload, conn)
+                        processed_ids.append(record['id'])
+                    except Exception as e:
+                        logger.error(f"Error processing payload {record['id']}: {e}")
+                        processed_ids.append(record['id'])
 
-            if processed_ids:
-                await conn.execute("""
-                    UPDATE core.raw_payloads 
-                    SET processed = TRUE 
-                    WHERE id = ANY($1::bigint[])
-                """, (processed_ids,))
-                logger.info(f"Processed {len(processed_ids)} raw payloads.")
+                if processed_ids:
+                    # SQLite doesn't support ANY($1::bigint[]), use IN clause
+                    placeholders = ','.join(['?'] * len(processed_ids))
+                    await conn.execute(f"""
+                        UPDATE core_raw_payloads 
+                        SET processed = 1 
+                        WHERE id IN ({placeholders})
+                    """, *processed_ids)
+                    logger.info(f"Processed {len(processed_ids)} raw payloads.")
+        except Exception as e:
+            logger.error(f"Worker batch processing error: {e}")

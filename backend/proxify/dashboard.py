@@ -26,8 +26,22 @@ class Dashboard:
         self.host = host
         self.port = port
         self.ws_clients: set[web.WebSocketResponse] = set()
-        self.app = web.Application(client_max_size=50 * 1024 * 1024)
+        self.app = web.Application(
+            client_max_size=50 * 1024 * 1024,
+            middlewares=[self._cors_middleware],
+        )
         self._setup_routes()
+
+    @web.middleware
+    async def _cors_middleware(self, request: web.Request, handler):
+        if request.method == "OPTIONS":
+            response = web.Response(status=204)
+        else:
+            response = await handler(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Client-ID"
+        return response
 
     def _setup_routes(self):
         # Serve API endpoints first
@@ -42,9 +56,45 @@ class Dashboard:
         self.app.router.add_get("/api/health", self._handle_health)
         self.app.router.add_get("/api/status", self._handle_health)
         self.app.router.add_get("/api/config", self._handle_get_config)
-        # Server UI is now handled by Nginx completely.
-        # We only keep the API endpoints here.
-        # All SPA routing is now handled by Nginx.
+
+    def mount_spa_static(self) -> None:
+        """Mount bundled React SPA static assets & fallback router (for standalone .exe mode).
+
+        Must be called AFTER all extension API routes have been registered so `/api/*`
+        and `/ws` take precedence over the catch-all SPA fallback.
+        """
+        candidates = [
+            Path(__file__).resolve().parent / "frontend_dist",
+            Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+        ]
+        dist_dir = next((p.resolve() for p in candidates if (p / "index.html").is_file()), None)
+        if dist_dir is None:
+            logger.debug("Frontend dist directory not found; running API-only mode.")
+            return
+
+        assets_dir = dist_dir / "assets"
+        if assets_dir.is_dir():
+            self.app.router.add_static("/assets/", path=str(assets_dir), show_index=False)
+
+        index_file = dist_dir / "index.html"
+
+        async def _serve_spa(request: web.Request) -> web.StreamResponse:
+            rel_path = request.match_info.get("tail", "").lstrip("/")
+            if rel_path.startswith("api/"):
+                return web.json_response({"error": "Not found"}, status=404)
+            if rel_path:
+                try:
+                    candidate = (dist_dir / rel_path).resolve()
+                    candidate.relative_to(dist_dir)
+                    if candidate.is_file():
+                        return web.FileResponse(path=candidate)
+                except (ValueError, OSError):
+                    pass
+            return web.FileResponse(path=index_file)
+
+        self.app.router.add_get("/", _serve_spa)
+        self.app.router.add_get("/{tail:.*}", _serve_spa)
+        logger.info(f"🖥️  Mounted standalone Dashboard SPA from: {dist_dir}")
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         return web.json_response({

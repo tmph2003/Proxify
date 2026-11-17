@@ -15,8 +15,8 @@ authors = [
 dependencies = [
     "mitmproxy>=10.1",
     "aiohttp>=3.9",
-    "psycopg2-binary>=2.9",
     "python-dotenv>=1.0.0",
+    "aiosqlite>=0.20.0",
 ]
 
 [project.scripts]

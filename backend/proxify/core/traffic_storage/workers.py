@@ -69,16 +69,13 @@ class TTLWorker(BackgroundWorker):
         if self._stop_event.is_set():
             return
 
-        conn = self.pool.get_connection()
         try:
-            with conn:
+            with self.pool.connection() as conn:
                 deleted_count = self.repository.delete_old_requests(conn, retention_days=self.retention_days)
                 if deleted_count > 0:
                     logger.info(f"[{self.name}] Cleaned up {deleted_count} old requests (retention: {self.retention_days} days).")
         except Exception as e:
             logger.error(f"[{self.name}] Error cleaning old requests: {e}")
-        finally:
-            self.pool.release_connection(conn)
 
 
 class AsyncWriterWorker(BackgroundWorker):
@@ -114,20 +111,30 @@ class AsyncWriterWorker(BackgroundWorker):
         
         if not self._batch:
             return  # Will just loop again if stop event isn't set
-        
-        conn = self.pool.get_connection()
+
+        batch = list(self._batch)
+        callbacks = list(self._callbacks)
+        self._batch.clear()
+        self._callbacks.clear()
+
+        row_ids: list[int] = []
         try:
-            with conn:
-                self.repository.save_requests_batch(conn, self._batch, self._callbacks)
+            with self.pool.connection() as conn:
+                row_ids = self.repository.save_requests_batch(conn, batch, callbacks=None)
         except Exception as e:
             logger.error(f"[{self.name}] Error bulk saving requests: {e}")
         finally:
-            self.pool.release_connection(conn)
-            for _ in self._batch:
+            for _ in batch:
                 self.write_queue.task_done()
-            
-            self._batch.clear()
-            self._callbacks.clear()
+
+        # Execute callbacks OUTSIDE the SQLite write lock/transaction
+        for i, row_id in enumerate(row_ids):
+            cb = callbacks[i] if i < len(callbacks) else None
+            if cb:
+                try:
+                    cb(row_id)
+                except Exception as cb_e:
+                    logger.error(f"[{self.name}] Callback error: {cb_e}")
 
     def on_stop(self):
         """Ensure we try to clear out the batch on stop if possible."""

@@ -1,5 +1,8 @@
 """Dynamic Extension Discovery and Loader for Proxify."""
 
+import importlib
+import importlib.abc
+import importlib.machinery
 import importlib.util
 import inspect
 import logging
@@ -17,6 +20,68 @@ from .context import ExtensionContext
 logger = logging.getLogger("proxify.sdk.loader")
 
 
+class _LegacyNamespaceAliasLoader(importlib.abc.Loader):
+    """Maps legacy `proxify.platforms.<ext>.*` imports to top-level `<ext>.*` modules.
+
+    Essential for Nuitka compiled binaries where extension submodules are compiled
+    under `<ext>.*` without `.py` files on disk.
+    """
+    def __init__(self, target_name: str):
+        self.target_name = target_name
+
+    def create_module(self, spec):
+        return importlib.import_module(self.target_name)
+
+    def exec_module(self, module):
+        pass
+
+
+class _LegacyNamespaceAliasFinder(importlib.abc.MetaPathFinder):
+    PREFIX = "proxify.platforms."
+    DIRECT_ALIASES = {
+        "proxify.utils.circuit_breaker": "circuit_breaker",
+    }
+
+    def find_spec(self, fullname: str, path=None, target=None):
+        target_name = self.DIRECT_ALIASES.get(fullname)
+        if target_name is None and fullname.startswith(self.PREFIX):
+            target_name = fullname[len(self.PREFIX):]
+        if not target_name:
+            return None
+        try:
+            target_mod = importlib.import_module(target_name)
+        except ImportError:
+            return None
+        is_pkg = hasattr(target_mod, "__path__")
+        return importlib.machinery.ModuleSpec(
+            fullname,
+            _LegacyNamespaceAliasLoader(target_name),
+            is_package=is_pkg,
+        )
+
+
+def _install_legacy_alias_finder() -> None:
+    if "proxify.platforms" not in sys.modules:
+        pkg = types.ModuleType("proxify.platforms")
+        pkg.__path__ = []
+        pkg.__package__ = "proxify.platforms"
+        sys.modules["proxify.platforms"] = pkg
+    if not any(isinstance(f, _LegacyNamespaceAliasFinder) for f in sys.meta_path):
+        sys.meta_path.insert(0, _LegacyNamespaceAliasFinder())
+
+
+def _get_builtin_extension_packages() -> tuple[str, ...]:
+    """Discover compiled built-in extension packages injected at build time or via env."""
+    try:
+        from proxify._compiled_extensions import COMPILED_EXTENSION_PACKAGES
+        if COMPILED_EXTENSION_PACKAGES:
+            return tuple(str(x).strip() for x in COMPILED_EXTENSION_PACKAGES if str(x).strip())
+    except ImportError:
+        pass
+    env_pkgs = os.getenv("PROXIFY_BUILTIN_EXTENSIONS", "")
+    return tuple(p.strip() for p in env_pkgs.split(",") if p.strip())
+
+
 class ExtensionLoader:
     """
     Discovers, loads, and manages extensions dynamically from EXTENSIONS_DIR.
@@ -25,24 +90,30 @@ class ExtensionLoader:
     Fault-isolated: an error in one extension will NOT crash the core server.
     """
 
+    BUILTIN_EXTENSION_PACKAGES = _get_builtin_extension_packages()
+
     def __init__(
         self,
         extensions_dir: Optional[str] = None,
         disabled: Optional[bool] = None,
     ):
-        env_dir = os.getenv("EXTENSIONS_DIR")
+        env_dir = os.getenv("EXTENSIONS_DIR") or os.getenv("PROXIFY_EXTENSIONS_DIR")
         if not env_dir:
-            repo_root = Path(__file__).resolve().parent.parent.parent.parent
-            private_ext = repo_root / "private" / "extensions"
-            local_ext = Path(__file__).resolve().parent.parent.parent / "extensions"
-            if private_ext.exists() and private_ext.is_dir():
-                env_dir = str(private_ext)
-            elif local_ext.exists() and local_ext.is_dir():
-                env_dir = str(local_ext)
-            elif Path("/app/extensions").exists():
-                env_dir = "/app/extensions"
+            if "__compiled__" in globals() or getattr(sys, "frozen", False):
+                exe_ext = Path(sys.executable).resolve().parent / "extensions"
+                env_dir = str(exe_ext)
             else:
-                env_dir = str(private_ext)
+                repo_root = Path(__file__).resolve().parent.parent.parent.parent
+                private_ext = repo_root / "private" / "extensions"
+                local_ext = Path(__file__).resolve().parent.parent.parent / "extensions"
+                if private_ext.exists() and private_ext.is_dir():
+                    env_dir = str(private_ext)
+                elif local_ext.exists() and local_ext.is_dir():
+                    env_dir = str(local_ext)
+                elif Path("/app/extensions").exists():
+                    env_dir = "/app/extensions"
+                else:
+                    env_dir = str(private_ext)
         self.extensions_dir = Path(extensions_dir or env_dir)
 
         # Support both DISABLE_EXTENSIONS and PROXIFY_DISABLE_EXTENSIONS
@@ -78,30 +149,47 @@ class ExtensionLoader:
             self._register_extensions_api(dashboard_app)
             return []
 
-        if not self.extensions_dir.exists() or not self.extensions_dir.is_dir():
-            logger.info(f"ℹ️ Extensions directory '{self.extensions_dir}' does not exist. Running pure core logger.")
+        _install_legacy_alias_finder()
+
+        candidates: List[tuple[str, BaseExtension]] = []
+        loaded_pkg_names: set[str] = set()
+
+        if self.extensions_dir.exists() and self.extensions_dir.is_dir():
+            # Add extensions directory and optional sibling shared directory to sys.path
+            ext_dir_str = str(self.extensions_dir.resolve())
+            if ext_dir_str not in sys.path:
+                sys.path.insert(0, ext_dir_str)
+            shared_dir = self.extensions_dir.resolve().parent / "shared"
+            if shared_dir.exists() and shared_dir.is_dir():
+                shared_str = str(shared_dir)
+                if shared_str not in sys.path:
+                    sys.path.insert(0, shared_str)
+
+            entries = sorted(list(self.extensions_dir.iterdir()))
+            for entry in entries:
+                if not entry.is_dir() or entry.name.startswith((".", "_")):
+                    continue
+                inst = self._load_extension_module(entry)
+                if inst is not None:
+                    candidates.append((entry.name, inst))
+                    loaded_pkg_names.add(entry.name)
+
+        # Also discover compiled built-in extensions (e.g. inside Nuitka standalone .exe)
+        builtin_pkgs = self.BUILTIN_EXTENSION_PACKAGES or _get_builtin_extension_packages()
+        for pkg_name in builtin_pkgs:
+            if pkg_name in loaded_pkg_names:
+                continue
+            inst = self._load_builtin_extension(pkg_name)
+            if inst is not None:
+                candidates.append((pkg_name, inst))
+                loaded_pkg_names.add(pkg_name)
+
+        if not candidates:
+            logger.info(f"ℹ️ No external or built-in extensions found (dir='{self.extensions_dir}'). Running pure core logger.")
             self._register_extensions_api(dashboard_app)
             return []
 
-        # Add extensions directory and optional sibling shared directory to sys.path
-        ext_dir_str = str(self.extensions_dir.resolve())
-        if ext_dir_str not in sys.path:
-            sys.path.insert(0, ext_dir_str)
-        shared_dir = self.extensions_dir.resolve().parent / "shared"
-        if shared_dir.exists() and shared_dir.is_dir():
-            shared_str = str(shared_dir)
-            if shared_str not in sys.path:
-                sys.path.insert(0, shared_str)
-
-        entries = sorted(list(self.extensions_dir.iterdir()))
-        for entry in entries:
-            if not entry.is_dir() or entry.name.startswith((".", "_")):
-                continue
-
-            extension_instance = self._load_extension_module(entry)
-            if extension_instance is None:
-                continue
-
+        for entry_name, extension_instance in candidates:
             # Create dedicated capability context for this extension
             context = ExtensionContext(
                 extension_id=extension_instance.id,
@@ -138,7 +226,7 @@ class ExtensionLoader:
                 )
             except Exception as init_err:
                 logger.error(
-                    f"❌ Failed to initialize extension '{entry.name}': {init_err}",
+                    f"❌ Failed to initialize extension '{entry_name}': {init_err}",
                     exc_info=True,
                 )
 
@@ -147,6 +235,31 @@ class ExtensionLoader:
         # Mount GET /api/extensions endpoint
         self._register_extensions_api(dashboard_app)
         return self.loaded_extensions
+
+    def _load_builtin_extension(self, pkg_name: str) -> Optional[BaseExtension]:
+        """Attempt to import a compiled built-in extension package (e.g. inside Nuitka binary)."""
+        try:
+            module = importlib.import_module(f"{pkg_name}.extension")
+        except ImportError:
+            return None
+        except Exception as e:
+            logger.error(f"❌ Failed to import built-in extension '{pkg_name}': {e}", exc_info=True)
+            return None
+
+        for attr_name in dir(module):
+            attr = getattr(module, attr_name)
+            if (
+                inspect.isclass(attr)
+                and issubclass(attr, BaseExtension)
+                and attr is not BaseExtension
+            ):
+                instance = attr()
+                if not hasattr(instance, "id") or not instance.id:
+                    instance.id = pkg_name
+                if not hasattr(instance, "name") or not instance.name:
+                    instance.name = pkg_name.capitalize()
+                return instance
+        return None
 
     def _load_extension_module(self, directory: Path) -> Optional[BaseExtension]:
         """

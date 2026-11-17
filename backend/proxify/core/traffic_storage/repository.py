@@ -3,89 +3,130 @@ import logging
 import re
 import time
 from typing import Any, Optional
-from psycopg2.extras import execute_values
 
 logger = logging.getLogger("proxify.core.traffic_storage.repository")
 
+
 class RequestRepository:
-    """Handles all PostgreSQL queries for captured HTTP requests."""
+    """Handles all SQLite queries for captured HTTP requests.
+
+    Migrated from PostgreSQL with FTS5 full-text search replacing tsvector.
+    """
 
     def init_db(self, conn):
-        """Create tables and indexes."""
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS requests (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TEXT NOT NULL,
-                    timestamp_epoch DOUBLE PRECISION NOT NULL,
-                    method TEXT NOT NULL,
-                    url TEXT NOT NULL,
-                    scheme TEXT,
-                    domain TEXT NOT NULL,
-                    port INTEGER,
-                    path TEXT,
-                    query_string TEXT,
-                    request_headers TEXT,
-                    request_body TEXT,
-                    request_content_type TEXT,
-                    status_code INTEGER,
-                    response_headers TEXT,
-                    response_body TEXT,
-                    response_content_type TEXT,
-                    response_size INTEGER DEFAULT 0,
-                    duration_ms DOUBLE PRECISION,
-                    is_graphql INTEGER DEFAULT 0,
-                    graphql_operation TEXT,
-                    graphql_doc_id TEXT,
-                    graphql_variables TEXT,
-                    tags TEXT DEFAULT '[]',
-                    search_vector tsvector
+        """Create tables, indexes, and FTS5 virtual table."""
+        cur = conn.cursor()
+
+        # Main requests table (no tsvector column — FTS5 handles search)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                timestamp_epoch REAL NOT NULL,
+                method TEXT NOT NULL,
+                url TEXT NOT NULL,
+                scheme TEXT,
+                domain TEXT NOT NULL,
+                port INTEGER,
+                path TEXT,
+                query_string TEXT,
+                request_headers TEXT,
+                request_body TEXT,
+                request_content_type TEXT,
+                status_code INTEGER,
+                response_headers TEXT,
+                response_body TEXT,
+                response_content_type TEXT,
+                response_size INTEGER DEFAULT 0,
+                duration_ms REAL,
+                is_graphql INTEGER DEFAULT 0,
+                graphql_operation TEXT,
+                graphql_doc_id TEXT,
+                graphql_variables TEXT,
+                tags TEXT DEFAULT '[]'
+            );
+        """)
+
+        # B-tree indexes (same as PostgreSQL)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_requests_domain ON requests(domain);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_requests_method ON requests(method);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status_code);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp_epoch);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_requests_graphql ON requests(is_graphql);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_requests_graphql_op ON requests(graphql_operation);")
+
+        # FTS5 virtual table for full-text search (replaces PostgreSQL tsvector + GIN)
+        cur.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS requests_fts USING fts5(
+                url,
+                request_body,
+                response_body,
+                graphql_operation,
+                content='requests',
+                content_rowid='id',
+                tokenize='porter unicode61'
+            );
+        """)
+
+        # Triggers to keep FTS5 in sync with the main table
+        # These replace the PostgreSQL plpgsql trigger function
+        cur.execute("""
+            CREATE TRIGGER IF NOT EXISTS requests_ai AFTER INSERT ON requests BEGIN
+                INSERT INTO requests_fts(rowid, url, request_body, response_body, graphql_operation)
+                VALUES (
+                    new.id,
+                    COALESCE(new.url, ''),
+                    CASE 
+                        WHEN new.request_content_type LIKE 'text/%' 
+                             OR new.request_content_type LIKE '%json%' 
+                             OR new.request_content_type LIKE '%xml%'
+                        THEN SUBSTR(COALESCE(new.request_body, ''), 1, 10000)
+                        ELSE ''
+                    END,
+                    CASE 
+                        WHEN new.response_content_type LIKE 'text/%' 
+                             OR new.response_content_type LIKE '%json%' 
+                             OR new.response_content_type LIKE '%xml%'
+                        THEN SUBSTR(COALESCE(new.response_body, ''), 1, 10000)
+                        ELSE ''
+                    END,
+                    COALESCE(new.graphql_operation, '')
                 );
+            END;
+        """)
 
-                CREATE INDEX IF NOT EXISTS idx_requests_domain ON requests(domain);
-                CREATE INDEX IF NOT EXISTS idx_requests_method ON requests(method);
-                CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status_code);
-                CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp_epoch);
-                CREATE INDEX IF NOT EXISTS idx_requests_graphql ON requests(is_graphql);
-                CREATE INDEX IF NOT EXISTS idx_requests_graphql_op ON requests(graphql_operation);
-                CREATE INDEX IF NOT EXISTS idx_requests_search ON requests USING GIN(search_vector);
-            """)
+        cur.execute("""
+            CREATE TRIGGER IF NOT EXISTS requests_ad AFTER DELETE ON requests BEGIN
+                INSERT INTO requests_fts(requests_fts, rowid, url, request_body, response_body, graphql_operation)
+                VALUES (
+                    'delete',
+                    old.id,
+                    COALESCE(old.url, ''),
+                    CASE 
+                        WHEN old.request_content_type LIKE 'text/%' 
+                             OR old.request_content_type LIKE '%json%' 
+                             OR old.request_content_type LIKE '%xml%'
+                        THEN SUBSTR(COALESCE(old.request_body, ''), 1, 10000)
+                        ELSE ''
+                    END,
+                    CASE 
+                        WHEN old.response_content_type LIKE 'text/%' 
+                             OR old.response_content_type LIKE '%json%' 
+                             OR old.response_content_type LIKE '%xml%'
+                        THEN SUBSTR(COALESCE(old.response_body, ''), 1, 10000)
+                        ELSE ''
+                    END,
+                    COALESCE(old.graphql_operation, '')
+                );
+            END;
+        """)
 
-            # Postgres function and trigger for FTS
-            cur.execute("""
-                CREATE OR REPLACE FUNCTION update_search_vector() RETURNS trigger AS $$
-                BEGIN
-                    IF (NEW.response_content_type LIKE 'text/%' OR NEW.response_content_type LIKE '%json%' OR NEW.response_content_type LIKE '%xml%') THEN
-                        NEW.search_vector := 
-                            setweight(to_tsvector('english', coalesce(NEW.url, '')), 'A') ||
-                            setweight(to_tsvector('english', substring(coalesce(NEW.request_body, ''), 1, 10000)), 'B') ||
-                            setweight(to_tsvector('english', substring(coalesce(NEW.response_body, ''), 1, 10000)), 'C') ||
-                            setweight(to_tsvector('english', coalesce(NEW.graphql_operation, '')), 'A');
-                    ELSE
-                        NEW.search_vector := 
-                            setweight(to_tsvector('english', coalesce(NEW.url, '')), 'A') ||
-                            setweight(to_tsvector('english', coalesce(NEW.graphql_operation, '')), 'A');
-                    END IF;
-                    RETURN NEW;
-                END
-                $$ LANGUAGE plpgsql;
-            """)
-            
-            cur.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'tsvectorupdate') THEN
-                        CREATE TRIGGER tsvectorupdate BEFORE INSERT OR UPDATE
-                        ON requests FOR EACH ROW EXECUTE FUNCTION update_search_vector();
-                    END IF;
-                END
-                $$;
-            """)
         conn.commit()
+        cur.close()
 
     def delete_old_requests(self, conn, retention_days: int = 7, interval: Optional[str] = None) -> int:
         """Deletes requests older than the given retention period in days.
-        
+
         Uses B-tree index on timestamp_epoch for O(log N) deletion.
         """
         if interval is not None:
@@ -97,50 +138,93 @@ class RequestRepository:
         retention_days = max(1, int(retention_days))
         cutoff_epoch = time.time() - (retention_days * 86400.0)
 
-        with conn.cursor() as cur:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM requests WHERE timestamp_epoch < ?;", (cutoff_epoch,))
+        deleted = cur.rowcount
+
+        # Also clean up old processed payloads in core_raw_payloads if table exists
+        try:
+            cutoff_ts = time.time() - (retention_days * 86400.0)
             cur.execute("""
-                DELETE FROM requests 
-                WHERE timestamp_epoch < %s;
-            """, (cutoff_epoch,))
-            deleted = cur.rowcount
+                DELETE FROM core_raw_payloads 
+                WHERE processed = 1 
+                  AND created_at < datetime('now', ? || ' days');
+            """, (f"-{retention_days}",))
+        except Exception:
+            pass
 
-            # Also clean up old processed payloads in core.raw_payloads if table exists
-            try:
-                cur.execute("""
-                    DELETE FROM core.raw_payloads 
-                    WHERE processed = TRUE 
-                      AND created_at < NOW() - (%s * INTERVAL '1 day');
-                """, (retention_days,))
-            except Exception:
-                pass
+        cur.close()
+        return deleted
 
-            return deleted
+    def save_requests_batch(self, conn, batch: list, callbacks: Optional[list] = None) -> list[int]:
+        """Saves a batch of requests using vectorized multi-row INSERT with RETURNING id.
 
-    def save_requests_batch(self, conn, batch: list, callbacks: list) -> None:
-        """Saves a batch of requests."""
-        with conn.cursor() as cur:
-            query = """
-                INSERT INTO requests (
-                    timestamp, timestamp_epoch, method, url, scheme, domain, port,
-                    path, query_string, request_headers, request_body,
-                    request_content_type, status_code, response_headers,
-                    response_body, response_content_type, response_size,
-                    duration_ms, is_graphql, graphql_operation, graphql_doc_id,
-                    graphql_variables
-                ) VALUES %s
-                RETURNING id
-            """
-            res = execute_values(cur, query, batch, fetch=True)
-            
-            for row_id, cb in zip(res, callbacks):
+        Wraps the batch write in an explicit transaction (BEGIN IMMEDIATE) to prevent
+        autocommit per-row overhead, and captures generated IDs via RETURNING id.
+        Callbacks are executed OUTSIDE the SQLite write transaction to prevent
+        prolonged database lock holding times.
+        """
+        if not batch:
+            return []
+
+        row_ids: list[int] = []
+        chunk_size = 500  # Well within SQLite MAX_VARIABLE_NUMBER (32766) limit (500*22=11000)
+
+        columns = (
+            "timestamp, timestamp_epoch, method, url, scheme, domain, port, "
+            "path, query_string, request_headers, request_body, "
+            "request_content_type, status_code, response_headers, "
+            "response_body, response_content_type, response_size, "
+            "duration_ms, is_graphql, graphql_operation, graphql_doc_id, "
+            "graphql_variables"
+        )
+        row_placeholder = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+
+        in_tx = getattr(conn, "in_transaction", False)
+        if not in_tx:
+            conn.execute("BEGIN IMMEDIATE;")
+
+        try:
+            for start in range(0, len(batch), chunk_size):
+                chunk = batch[start:start + chunk_size]
+                placeholders = ", ".join([row_placeholder] * len(chunk))
+                query = f"INSERT INTO requests ({columns}) VALUES {placeholders} RETURNING id"
+                flat_params = [val for row in chunk for val in row]
+
+                cur = conn.cursor()
+                try:
+                    cur.execute(query, flat_params)
+                    chunk_ids = [r[0] for r in cur.fetchall()]
+                    row_ids.extend(chunk_ids)
+                finally:
+                    cur.close()
+
+            if not in_tx:
+                conn.commit()
+        except Exception:
+            if not in_tx:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
+        # Execute callbacks OUTSIDE the SQLite write lock/transaction
+        if callbacks:
+            for i, row_id in enumerate(row_ids):
+                cb = callbacks[i] if i < len(callbacks) else None
                 if cb:
                     try:
-                        cb(row_id[0])
+                        cb(row_id)
                     except Exception as cb_e:
                         logger.error(f"[Repository] Callback error: {cb_e}")
 
+        return row_ids
+
     def save_request(self, conn, params: tuple) -> int:
-        with conn.cursor() as cur:
+        cur = conn.cursor()
+        try:
+            in_tx = getattr(conn, "in_transaction", False)
             cur.execute(
                 """
                 INSERT INTO requests (
@@ -150,16 +234,23 @@ class RequestRepository:
                     response_body, response_content_type, response_size,
                     duration_ms, is_graphql, graphql_operation, graphql_doc_id,
                     graphql_variables
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 params
             )
-            return cur.fetchone()[0]
+            row = cur.fetchone()
+            row_id = row[0] if row else cur.lastrowid
+            if not in_tx:
+                conn.commit()
+            return row_id
+        finally:
+            cur.close()
 
     def get_request(self, pool, request_id: int) -> Optional[dict]:
-        with pool.cursor(dict_cursor=True) as cur:
-            cur.execute("SELECT * FROM requests WHERE id = %s", (request_id,))
+        read_ctx = pool.read_cursor(dict_cursor=True) if hasattr(pool, "read_cursor") else pool.cursor(dict_cursor=True)
+        with read_ctx as cur:
+            cur.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
             row = cur.fetchone()
         if row:
             return self._row_to_dict(row)
@@ -181,23 +272,23 @@ class RequestRepository:
         params: list[Any] = []
 
         if domain:
-            conditions.append("domain LIKE %s")
+            conditions.append("r.domain LIKE ?")
             params.append(f"%{domain}%")
         if method:
-            conditions.append("method = %s")
+            conditions.append("r.method = ?")
             params.append(method.upper())
         if status_code is not None:
-            conditions.append("status_code = %s")
+            conditions.append("r.status_code = ?")
             params.append(status_code)
         if graphql_only:
-            conditions.append("is_graphql = 1")
+            conditions.append("r.is_graphql = 1")
         if since is not None:
-            conditions.append("timestamp_epoch > %s")
+            conditions.append("r.timestamp_epoch > ?")
             params.append(since)
 
         if search:
-            # Postgres FTS
-            conditions.append("search_vector @@ plainto_tsquery('english', %s)")
+            # SQLite FTS5 full-text search (replaces PostgreSQL tsvector @@)
+            conditions.append("r.id IN (SELECT rowid FROM requests_fts WHERE requests_fts MATCH ?)")
             params.append(search)
 
         where = ""
@@ -205,60 +296,80 @@ class RequestRepository:
             where = "WHERE " + " AND ".join(conditions)
 
         query = f"""
-            SELECT id, timestamp, method, url, domain, path, status_code,
-                   response_content_type, response_size, duration_ms,
-                   is_graphql, graphql_operation, graphql_doc_id
-            FROM requests
+            SELECT r.id, r.timestamp, r.method, r.url, r.domain, r.path, r.status_code,
+                   r.response_content_type, r.response_size, r.duration_ms,
+                   r.is_graphql, r.graphql_operation, r.graphql_doc_id
+            FROM requests r
             {where}
-            ORDER BY id DESC
-            LIMIT %s OFFSET %s
+            ORDER BY r.id DESC
+            LIMIT ? OFFSET ?
         """
         params.extend([limit, offset])
 
-        with pool.cursor(dict_cursor=True) as cur:
+        read_ctx = pool.read_cursor(dict_cursor=True) if hasattr(pool, "read_cursor") else pool.cursor(dict_cursor=True)
+        with read_ctx as cur:
             cur.execute(query, tuple(params))
             rows = cur.fetchall()
-            
+
         return [dict(row) for row in rows]
 
     def get_domains(self, pool, since: Optional[float] = None) -> list[dict]:
-        with pool.cursor(dict_cursor=True) as cur:
-            where = "WHERE timestamp_epoch >= %s" if since is not None else ""
-            params = (since,) if since is not None else ()
-            cur.execute(f"""
-                SELECT domain, COUNT(*) as count
-                FROM requests
-                {where}
-                GROUP BY domain
-                ORDER BY count DESC
-            """, params)
+        read_ctx = pool.read_cursor(dict_cursor=True) if hasattr(pool, "read_cursor") else pool.cursor(dict_cursor=True)
+        with read_ctx as cur:
+            if since is not None:
+                cur.execute("""
+                    SELECT domain, COUNT(*) as count
+                    FROM requests
+                    WHERE timestamp_epoch >= ?
+                    GROUP BY domain
+                    ORDER BY count DESC
+                """, (since,))
+            else:
+                cur.execute("""
+                    SELECT domain, COUNT(*) as count
+                    FROM requests
+                    GROUP BY domain
+                    ORDER BY count DESC
+                """)
             rows = cur.fetchall()
         return [dict(row) for row in rows]
 
     def get_stats(self, pool, since: Optional[float] = None) -> dict:
-        with pool.cursor(dict_cursor=True) as cur:
-            where = "WHERE timestamp_epoch >= %s" if since is not None else ""
-            params = (since,) if since is not None else ()
-            cur.execute(f"""
-                SELECT
-                    COUNT(*) as total_requests,
-                    COUNT(DISTINCT domain) as unique_domains,
-                    SUM(CASE WHEN is_graphql = 1 THEN 1 ELSE 0 END) as graphql_requests,
-                    SUM(response_size) as total_response_bytes,
-                    MIN(timestamp) as first_capture,
-                    MAX(timestamp) as last_capture
-                FROM requests
-                {where}
-            """, params)
+        read_ctx = pool.read_cursor(dict_cursor=True) if hasattr(pool, "read_cursor") else pool.cursor(dict_cursor=True)
+        with read_ctx as cur:
+            if since is not None:
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as total_requests,
+                        COUNT(DISTINCT domain) as unique_domains,
+                        SUM(CASE WHEN is_graphql = 1 THEN 1 ELSE 0 END) as graphql_requests,
+                        SUM(response_size) as total_response_bytes,
+                        MIN(timestamp) as first_capture,
+                        MAX(timestamp) as last_capture
+                    FROM requests
+                    WHERE timestamp_epoch >= ?
+                """, (since,))
+            else:
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as total_requests,
+                        COUNT(DISTINCT domain) as unique_domains,
+                        SUM(CASE WHEN is_graphql = 1 THEN 1 ELSE 0 END) as graphql_requests,
+                        SUM(response_size) as total_response_bytes,
+                        MIN(timestamp) as first_capture,
+                        MAX(timestamp) as last_capture
+                    FROM requests
+                """)
             row = cur.fetchone()
         return dict(row) if row else {}
 
     def get_requests_for_export(
         self, pool, ids: Optional[list[int]] = None, **filters
     ) -> list[dict]:
-        with pool.cursor(dict_cursor=True) as cur:
+        read_ctx = pool.read_cursor(dict_cursor=True) if hasattr(pool, "read_cursor") else pool.cursor(dict_cursor=True)
+        with read_ctx as cur:
             if ids:
-                placeholders = ",".join(["%s"] * len(ids))
+                placeholders = ",".join(["?"] * len(ids))
                 cur.execute(
                     f"SELECT * FROM requests WHERE id IN ({placeholders}) ORDER BY id",
                     tuple(ids),
@@ -269,15 +380,15 @@ class RequestRepository:
                 params = []
 
                 if filters.get("domain"):
-                    conditions.append("domain LIKE %s")
+                    conditions.append("domain LIKE ?")
                     params.append(f"%{filters['domain']}%")
                 if filters.get("method"):
-                    conditions.append("method = %s")
+                    conditions.append("method = ?")
                     params.append(filters["method"].upper())
                 if filters.get("graphql_only"):
                     conditions.append("is_graphql = 1")
                 if filters.get("status_code") is not None:
-                    conditions.append("status_code = %s")
+                    conditions.append("status_code = ?")
                     params.append(filters["status_code"])
 
                 where = ""
@@ -286,7 +397,7 @@ class RequestRepository:
 
                 limit = filters.get("limit", 200)
                 cur.execute(
-                    f"SELECT * FROM requests {where} ORDER BY id DESC LIMIT %s",
+                    f"SELECT * FROM requests {where} ORDER BY id DESC LIMIT ?",
                     tuple(params + [limit]),
                 )
                 rows = cur.fetchall()
@@ -296,7 +407,7 @@ class RequestRepository:
     def delete_requests(self, pool, ids: Optional[list[int]] = None):
         with pool.cursor() as cur:
             if ids:
-                placeholders = ",".join(["%s"] * len(ids))
+                placeholders = ",".join(["?"] * len(ids))
                 cur.execute(
                     f"DELETE FROM requests WHERE id IN ({placeholders})", tuple(ids)
                 )
@@ -312,7 +423,7 @@ class RequestRepository:
                     d[field] = json.loads(d[field])
                 except (json.JSONDecodeError, TypeError):
                     pass
-        # Ignore search_vector from the output
+        # Remove search_vector if present (legacy compat)
         if "search_vector" in d:
             del d["search_vector"]
         return d

@@ -24,9 +24,15 @@ class DashboardBroadcaster(EventListener):
         if response is None:
             return
 
-        parsed = urlparse(request.pretty_url)
-        domain = parsed.hostname or ""
-        path = parsed.path or ""
+        req_path = getattr(request, "path", None)
+        req_host = getattr(request, "host", None) or getattr(request, "pretty_host", None)
+        if isinstance(req_path, str) and isinstance(req_host, str):
+            domain = req_host.split(":", 1)[0]
+            path = req_path.split("?")[0].split("#")[0]
+        else:
+            parsed = urlparse(getattr(request, "pretty_url", "") or "")
+            domain = parsed.hostname or ""
+            path = parsed.path or ""
 
         start_time = getattr(request, "timestamp_start", None)
         duration_ms = None
@@ -77,10 +83,27 @@ class DatabaseWriter(EventListener):
         if response is None:
             return
 
-        parsed = urlparse(request.pretty_url)
-        domain = parsed.hostname or ""
-        port = parsed.port
-        path = parsed.path or ""
+        req_path = getattr(request, "path", None)
+        req_host = getattr(request, "host", None) or getattr(request, "pretty_host", None)
+        req_scheme = getattr(request, "scheme", None)
+        req_port = getattr(request, "port", None)
+
+        if isinstance(req_path, str) and isinstance(req_host, str) and isinstance(req_scheme, str):
+            domain = req_host.split(":", 1)[0]
+            is_standard_port = (req_scheme == "https" and req_port == 443) or (req_scheme == "http" and req_port == 80)
+            port = None if is_standard_port else (req_port if isinstance(req_port, int) else None)
+            path_and_query = req_path.split("#")[0]
+            parts = path_and_query.split("?", 1)
+            path = parts[0]
+            query_string = parts[1] if len(parts) > 1 else ""
+            scheme = req_scheme
+        else:
+            parsed = urlparse(getattr(request, "pretty_url", "") or "")
+            domain = parsed.hostname or ""
+            port = parsed.port
+            path = parsed.path or ""
+            scheme = parsed.scheme or ""
+            query_string = parsed.query or ""
 
         start_time = getattr(request, "timestamp_start", None)
         duration_ms = None
@@ -121,11 +144,11 @@ class DatabaseWriter(EventListener):
         data = {
             "method": request.method,
             "url": request.pretty_url,
-            "scheme": parsed.scheme,
+            "scheme": scheme,
             "domain": domain,
             "port": port,
             "path": path,
-            "query_string": parsed.query,
+            "query_string": query_string,
             "request_headers": req_headers,
             "request_body": req_body,
             "request_content_type": req_content_type,
